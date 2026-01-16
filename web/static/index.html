@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="color-scheme" content="dark">
+    <title>SongGeneration Studio</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/styles.css">
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <!-- WaveSurfer.js for waveform visualization -->
+    <script src="https://unpkg.com/wavesurfer.js@7"></script>
+    <script src="https://unpkg.com/wavesurfer.js@7/dist/plugins/regions.esm.js" type="module"></script>
+</head>
+<body>
+<div id="root"></div>
+<script>
+// Load and transform JSX files in order
+async function loadApp() {
+    const cacheBust = 'v=' + Date.now();
+    try {
+        // Load files in dependency order:
+        // 1. constants.js - Base utilities, no dependencies
+        // 2. icons.js - Icon components (depends on React from constants)
+        // 3. api.js - API functions, no dependencies
+        // 4. hooks.js - Custom hooks (depends on constants for MODEL_BASE_TIMES)
+        // 5. components.js - UI components (depends on all above)
+        // 6. app.js - Main app (depends on all above)
+
+        const files = [
+            '/static/constants.js',
+            '/static/icons.js',
+            '/static/api.js',
+            '/static/hooks.js',
+            '/static/components.js',
+            '/static/app.js'
+        ];
+
+        for (const file of files) {
+            const res = await fetch(file + '?' + cacheBust);
+            if (!res.ok) throw new Error(`Failed to load ${file}: ${res.status}`);
+            const code = await res.text();
+            const transformed = Babel.transform(code, { presets: ['react'] }).code;
+            eval(transformed);
+        }
+    } catch (error) {
+        console.error('Failed to load app:', error);
+        document.getElementById('root').innerHTML = `
+            <div style="color: #EF4444; padding: 40px; text-align: center;">
+                <h2>Failed to load application</h2>
+                <p style="color: #888; margin-top: 10px;">${error.message}</p>
+                <button onclick="location.reload()" style="margin-top: 20px; padding: 10px 20px; background: #10B981; color: white; border: none; border-radius: 8px; cursor: pointer;">
+                    Retry
+                </button>
+            </div>
+        `;
+    }
+}
+loadApp();
+</script>
+</body>
+</html>

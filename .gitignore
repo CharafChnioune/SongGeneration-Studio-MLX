@@ -1,0 +1,28 @@
+.DS_Store
+.git_old/
+.venv/
+__pycache__/
+**/__pycache__/
+*.pyc
+
+output/
+uploads/
+ckpt/
+third_party/
+sample/output_*/
+sample/realsongssamoples/
+sample/*.wav
+sample/*.flac
+sample/*.mp3
+
+**/.cache/
+**/model_fp16.npz
+**/model_int8.npz
+**/model_int4.npz
+**/model_fp32.npz
+
+# Directory with trailing space (artifact)
+SongGeneration-large\ /
+
+launchs/
+sample/generated/
