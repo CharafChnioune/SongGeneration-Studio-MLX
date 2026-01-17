@@ -99,6 +99,23 @@ var App = () => {
     const loadGpuInfo = async () => { try { setGpuInfo(await fetchGpuInfo()); } catch (e) { console.error(e); } };
     const loadTimingStats = async () => { try { setTimingStats(await fetchTimingStats()); } catch (e) { console.error(e); } };
 
+    const formatDownloadDetails = (model) => {
+        if (!model) return '';
+        const parts = [];
+        if (model.size_gb) {
+            const downloaded = Number(model.downloaded_gb || 0).toFixed(2);
+            const total = Number(model.size_gb).toFixed(1);
+            parts.push(`${downloaded} / ${total} GB`);
+        }
+        if (model.speed_mbps && model.speed_mbps > 0) {
+            parts.push(`${Number(model.speed_mbps).toFixed(1)} MB/s`);
+        }
+        if (model.eta_seconds && model.eta_seconds > 0) {
+            parts.push(`ETA ${formatEta(model.eta_seconds)}`);
+        }
+        return parts.join(' | ');
+    };
+
     useEffect(() => { localStorage.setItem('lyrics_provider', lyricsProvider); }, [lyricsProvider]);
     useEffect(() => { localStorage.setItem('lyrics_base_url', lyricsBaseUrl); }, [lyricsBaseUrl]);
     useEffect(() => { localStorage.setItem('lyrics_model', lyricsModel); }, [lyricsModel]);
@@ -1016,7 +1033,7 @@ var App = () => {
                         </button>
                     ))}
                 </div>
-                <a href="https://github.com/BazedFrog/SongGeneration-Studio" target="_blank" rel="noopener noreferrer"
+                <a href="https://github.com/CharafChnioune/SongGeneration-Studio-MLX" target="_blank" rel="noopener noreferrer"
                     style={{ position: 'absolute', right: '24px', display: 'flex', alignItems: 'center', gap: '6px', color: '#666', textDecoration: 'none', padding: '8px 12px', borderRadius: '8px', transition: 'all 0.15s' }}
                     onMouseEnter={e => { e.currentTarget.style.color = '#fff'; e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.1)'; }}
                     onMouseLeave={e => { e.currentTarget.style.color = '#666'; e.currentTarget.style.backgroundColor = 'transparent'; }}>
@@ -1059,18 +1076,22 @@ var App = () => {
                                         {modelState.isInitializing || modelState.autoDownloadStarting ? <><SpinnerIcon size={14} /> Loading...</> : modelState.allModels.some(m => m.status === 'downloading') ? 'Downloading model...' : 'No Models Downloaded'}
                                     </div>
                                 )}
-                                {modelState.allModels.filter(m => m.status === 'downloading').map(m => (
-                                    <div key={m.id} style={{ backgroundColor: 'rgba(245, 158, 11, 0.1)', border: '1px solid rgba(245, 158, 11, 0.3)', borderRadius: '8px', padding: '10px 12px', marginBottom: '12px' }}>
-                                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
-                                            <span style={{ fontSize: '12px', color: '#F59E0B', fontWeight: '500' }}>Downloading {m.name}</span>
-                                            <span style={{ fontSize: '11px', color: '#888' }}>{m.progress || 0}%</span>
+                                {modelState.allModels.filter(m => m.status === 'downloading').map(m => {
+                                    const details = formatDownloadDetails(m);
+                                    return (
+                                        <div key={m.id} style={{ backgroundColor: 'rgba(245, 158, 11, 0.1)', border: '1px solid rgba(245, 158, 11, 0.3)', borderRadius: '8px', padding: '10px 12px', marginBottom: '12px' }}>
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
+                                                <span style={{ fontSize: '12px', color: '#F59E0B', fontWeight: '500' }}>Downloading {m.name}</span>
+                                                <span style={{ fontSize: '11px', color: '#888' }}>{m.progress || 0}%</span>
+                                            </div>
+                                            <div style={{ height: '6px', backgroundColor: 'rgba(245, 158, 11, 0.2)', borderRadius: '3px', overflow: 'hidden' }}>
+                                                <div style={{ width: `${m.progress || 0}%`, height: '100%', backgroundColor: '#F59E0B', borderRadius: '3px', transition: 'width 0.3s' }} />
+                                            </div>
+                                            {details && <div style={{ marginTop: '6px', fontSize: '10px', color: '#C0841A' }}>{details}</div>}
+                                            <button onClick={() => modelState.cancelDownload(m.id)} style={{ background: 'none', border: 'none', color: '#EF4444', cursor: 'pointer', padding: '2px 6px', fontSize: '10px', marginTop: '6px' }}>Cancel</button>
                                         </div>
-                                        <div style={{ height: '6px', backgroundColor: 'rgba(245, 158, 11, 0.2)', borderRadius: '3px', overflow: 'hidden' }}>
-                                            <div style={{ width: `${m.progress || 0}%`, height: '100%', backgroundColor: '#F59E0B', borderRadius: '3px', transition: 'width 0.3s' }} />
-                                        </div>
-                                        <button onClick={() => modelState.cancelDownload(m.id)} style={{ background: 'none', border: 'none', color: '#EF4444', cursor: 'pointer', padding: '2px 6px', fontSize: '10px', marginTop: '6px' }}>Cancel</button>
-                                    </div>
-                                ))}
+                                    );
+                                })}
                             <button onClick={() => setShowModelManager(true)} style={{ width: '100%', padding: '10px', backgroundColor: '#2a2a2a', border: '1px solid #444', borderRadius: '8px', color: '#fff', fontSize: '12px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
                                 <SettingsIcon /> Manage Models
                             </button>
@@ -1542,17 +1563,31 @@ var App = () => {
                         </div>
                         {gpuInfo?.gpu && <div style={{ backgroundColor: '#252525', borderRadius: '8px', padding: '12px', marginBottom: '16px', fontSize: '12px' }}><div style={{ color: '#fff', fontWeight: '500', marginBottom: '4px' }}>{gpuInfo.gpu.name}</div><div style={{ color: '#888' }}>{gpuInfo.gpu.free_gb}GB available / {gpuInfo.gpu.total_gb}GB total</div></div>}
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                            {modelState.allModels.map(m => (
-                                <div key={m.id} style={{ backgroundColor: '#252525', borderRadius: '12px', padding: '16px', border: m.status === 'ready' ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid #333' }}>
-                                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
-                                        <div><div style={{ fontSize: '14px', fontWeight: '500', color: '#fff', marginBottom: '4px' }}>{m.name}{m.id === modelState.recommendedModel && <span style={{ marginLeft: '8px', fontSize: '10px', backgroundColor: 'rgba(16, 185, 129, 0.2)', color: '#10B981', padding: '2px 6px', borderRadius: '4px' }}>Recommended</span>}</div><div style={{ fontSize: '12px', color: '#888' }}>{m.description}</div></div>
-                                        <div style={{ textAlign: 'right', fontSize: '11px', color: '#666' }}><div>{m.size_gb}GB</div><div>{m.vram_required}GB VRAM</div></div>
+                            {modelState.allModels.map(m => {
+                                const downloadDetails = formatDownloadDetails(m);
+                                return (
+                                    <div key={m.id} style={{ backgroundColor: '#252525', borderRadius: '12px', padding: '16px', border: m.status === 'ready' ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid #333' }}>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+                                            <div><div style={{ fontSize: '14px', fontWeight: '500', color: '#fff', marginBottom: '4px' }}>{m.name}{m.id === modelState.recommendedModel && <span style={{ marginLeft: '8px', fontSize: '10px', backgroundColor: 'rgba(16, 185, 129, 0.2)', color: '#10B981', padding: '2px 6px', borderRadius: '4px' }}>Recommended</span>}</div><div style={{ fontSize: '12px', color: '#888' }}>{m.description}</div></div>
+                                            <div style={{ textAlign: 'right', fontSize: '11px', color: '#666' }}><div>{m.size_gb}GB</div><div>{m.vram_required}GB VRAM</div></div>
+                                        </div>
+                                        {m.status === 'ready' && <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}><span style={{ fontSize: '12px', color: '#10B981' }}><CheckIcon /> Ready</span><button onClick={() => modelState.deleteModel(m.id)} style={{ padding: '6px 12px', fontSize: '11px', backgroundColor: 'transparent', color: '#EF4444', border: '1px solid rgba(239, 68, 68, 0.3)', borderRadius: '6px', cursor: 'pointer' }}>Delete</button></div>}
+                                        {m.status === 'downloading' && (
+                                            <div>
+                                                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+                                                    <span style={{ fontSize: '12px', color: '#F59E0B' }}>Downloading... {m.progress || 0}%</span>
+                                                    <button onClick={() => modelState.cancelDownload(m.id)} style={{ padding: '4px 10px', fontSize: '11px', backgroundColor: 'transparent', color: '#EF4444', border: '1px solid rgba(239, 68, 68, 0.3)', borderRadius: '6px', cursor: 'pointer' }}>Cancel</button>
+                                                </div>
+                                                <div style={{ height: '6px', backgroundColor: '#333', borderRadius: '3px', overflow: 'hidden' }}>
+                                                    <div style={{ width: `${m.progress || 0}%`, height: '100%', backgroundColor: '#F59E0B', transition: 'width 0.3s' }} />
+                                                </div>
+                                                {downloadDetails && <div style={{ marginTop: '8px', fontSize: '11px', color: '#C0841A' }}>{downloadDetails}</div>}
+                                            </div>
+                                        )}
+                                        {m.status === 'not_downloaded' && <button onClick={() => modelState.startDownload(m.id)} style={{ width: '100%', padding: '10px', fontSize: '12px', backgroundColor: '#10B981', color: '#fff', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: '500' }}>Download ({m.size_gb}GB)</button>}
                                     </div>
-                                    {m.status === 'ready' && <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}><span style={{ fontSize: '12px', color: '#10B981' }}><CheckIcon /> Ready</span><button onClick={() => modelState.deleteModel(m.id)} style={{ padding: '6px 12px', fontSize: '11px', backgroundColor: 'transparent', color: '#EF4444', border: '1px solid rgba(239, 68, 68, 0.3)', borderRadius: '6px', cursor: 'pointer' }}>Delete</button></div>}
-                                    {m.status === 'downloading' && <div><div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}><span style={{ fontSize: '12px', color: '#F59E0B' }}>Downloading... {m.progress || 0}%</span><button onClick={() => modelState.cancelDownload(m.id)} style={{ padding: '4px 10px', fontSize: '11px', backgroundColor: 'transparent', color: '#EF4444', border: '1px solid rgba(239, 68, 68, 0.3)', borderRadius: '6px', cursor: 'pointer' }}>Cancel</button></div><div style={{ height: '6px', backgroundColor: '#333', borderRadius: '3px', overflow: 'hidden' }}><div style={{ width: `${m.progress || 0}%`, height: '100%', backgroundColor: '#F59E0B', transition: 'width 0.3s' }} /></div></div>}
-                                    {m.status === 'not_downloaded' && <button onClick={() => modelState.startDownload(m.id)} style={{ width: '100%', padding: '10px', fontSize: '12px', backgroundColor: '#10B981', color: '#fff', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: '500' }}>Download ({m.size_gb}GB)</button>}
-                                </div>
-                            ))}
+                                );
+                            })}
                         </div>
                     </div>
                 </div>

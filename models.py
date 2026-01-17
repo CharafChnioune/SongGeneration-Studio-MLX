@@ -6,8 +6,12 @@ from __future__ import annotations
 
 import shutil
 import threading
+import time
 from pathlib import Path
 from typing import Dict, Optional, List
+
+import requests
+from huggingface_hub import HfApi, HfFolder, hf_hub_url
 
 from config import (
     BASE_DIR,
@@ -158,8 +162,6 @@ def get_best_ready_model(refresh: bool = False) -> Optional[str]:
 
 
 def _download_worker(model_id: str) -> None:
-    from huggingface_hub import snapshot_download
-
     repo_id = _resolve_hf_repo(model_id)
     if not repo_id:
         download_states[model_id] = {
@@ -168,26 +170,114 @@ def _download_worker(model_id: str) -> None:
         }
         return
 
-    download_states[model_id] = {"status": "downloading", "progress": 0}
-    allow_patterns = None
-    local_dir = None
-
-    if HF_MODEL_LAYOUT == "single":
-        local_dir = str(BASE_DIR)
-        allow_patterns = [f"{model_id}/*"]
-    else:
-        local_dir = str(_model_dir(model_id))
-
     try:
-        snapshot_download(
-            repo_id=repo_id,
-            repo_type="model",
-            local_dir=local_dir,
-            allow_patterns=allow_patterns,
-            local_dir_use_symlinks=False,
-            resume_download=True,
-        )
-        download_states[model_id] = {"status": "completed", "progress": 100}
+        api = HfApi()
+        info = api.model_info(repo_id=repo_id)
+        prefix = f"{model_id}/" if HF_MODEL_LAYOUT == "single" else ""
+        wanted = set(MLX_WEIGHT_PREFERENCE + ("config.yaml", "README.md"))
+        files = []
+        total_bytes = 0
+
+        for sibling in info.siblings:
+            name = sibling.rfilename
+            if prefix and not name.startswith(prefix):
+                continue
+            rel = name[len(prefix):]
+            if rel not in wanted:
+                continue
+            size = sibling.size or 0
+            files.append({"remote": name, "rel": rel, "size": size})
+            total_bytes += size
+
+        if not files:
+            raise RuntimeError(f"No model files found in {repo_id}")
+
+        model_dir = _model_dir(model_id)
+        model_dir.mkdir(parents=True, exist_ok=True)
+
+        downloaded_bytes = 0
+        for item in files:
+            dest = model_dir / item["rel"]
+            if dest.exists() and item["size"] and dest.stat().st_size == item["size"]:
+                downloaded_bytes += item["size"]
+
+        last_time = time.time()
+        last_bytes = downloaded_bytes
+
+        def update_progress(current_bytes: int) -> None:
+            nonlocal last_time, last_bytes
+            now = time.time()
+            if now - last_time < 1.0:
+                return
+            speed = (current_bytes - last_bytes) / max(1e-6, now - last_time)
+            last_time = now
+            last_bytes = current_bytes
+            if total_bytes > 0:
+                progress = int(min(100, (current_bytes / total_bytes) * 100))
+                eta = int(max(0, (total_bytes - current_bytes) / speed)) if speed > 0 else 0
+            else:
+                progress = 0
+                eta = 0
+            download_states[model_id] = {
+                "status": "downloading",
+                "progress": progress,
+                "downloaded_gb": round(current_bytes / (1024 ** 3), 2),
+                "speed_mbps": round(speed / (1024 ** 2), 2),
+                "eta_seconds": eta,
+            }
+
+        token = HfFolder.get_token()
+        headers = {"Authorization": f"Bearer {token}"} if token else {}
+
+        for item in files:
+            dest = model_dir / item["rel"]
+            expected = item["size"]
+            if dest.exists() and expected and dest.stat().st_size == expected:
+                update_progress(downloaded_bytes)
+                continue
+
+            tmp_path = dest.with_suffix(dest.suffix + ".part")
+            existing = tmp_path.stat().st_size if tmp_path.exists() else 0
+            if dest.exists() and expected and dest.stat().st_size != expected:
+                dest.unlink()
+
+            url = hf_hub_url(repo_id=repo_id, filename=item["remote"], repo_type="model")
+            req_headers = dict(headers)
+            if existing > 0:
+                req_headers["Range"] = f"bytes={existing}-"
+
+            with requests.get(url, headers=req_headers, stream=True, timeout=30) as resp:
+                if resp.status_code == 416:
+                    if tmp_path.exists():
+                        tmp_path.unlink()
+                    existing = 0
+                    req_headers.pop("Range", None)
+                    resp = requests.get(url, headers=req_headers, stream=True, timeout=30)
+                resp.raise_for_status()
+                mode = "ab" if existing > 0 else "wb"
+                with open(tmp_path, mode) as f:
+                    for chunk in resp.iter_content(chunk_size=8 * 1024 * 1024):
+                        if not chunk:
+                            continue
+                        f.write(chunk)
+                        existing += len(chunk)
+                        current_total = downloaded_bytes + existing
+                        update_progress(current_total)
+
+            tmp_size = tmp_path.stat().st_size if tmp_path.exists() else 0
+            if expected and tmp_size != expected:
+                raise RuntimeError(f"Incomplete download for {item['rel']}: {tmp_size} / {expected}")
+            tmp_path.replace(dest)
+            downloaded_bytes += tmp_size
+            update_progress(downloaded_bytes)
+
+        download_states[model_id] = {
+            "status": "completed",
+            "progress": 100,
+            "downloaded_gb": round(total_bytes / (1024 ** 3), 2),
+            "speed_mbps": 0,
+            "eta_seconds": 0,
+        }
     except Exception as exc:
         download_states[model_id] = {"status": "error", "error": str(exc)}
 

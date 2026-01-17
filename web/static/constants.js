@@ -152,6 +152,19 @@ var formatTime = (seconds) => {
     return `${mins}:${secs.toString().padStart(2, '0')}`;
 };
 
+// Format seconds to M:SS or H:MM:SS
+var formatEta = (seconds) => {
+    if (!seconds || isNaN(seconds) || seconds < 0) return '--:--';
+    const total = Math.floor(seconds);
+    const hours = Math.floor(total / 3600);
+    const mins = Math.floor((total % 3600) / 60);
+    const secs = total % 60;
+    if (hours > 0) {
+        return `${hours}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+    }
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+};
+
 // Parse section type into base and duration
 var fromApiType = (type) => {
     const parts = type.split('-');
