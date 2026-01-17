@@ -1,0 +1,15 @@
+{
+  "title": "SongGeneration Studio MLX",
+  "description": "MLX-only song generation studio with lyrics+style AI, model auto-download, and web UI.",
+  "icon": "icon.png",
+  "links": [
+    {
+      "title": "GitHub",
+      "value": "https://github.com/CharafChnioune/SongGeneration-Studio-MLX"
+    },
+    {
+      "title": "Hugging Face Models",
+      "value": "https://huggingface.co/AITRADER/SongGeneration-Large-MLX"
+    }
+  ]
+}
