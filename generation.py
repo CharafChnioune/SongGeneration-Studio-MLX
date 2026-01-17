@@ -10,11 +10,7 @@ import time
 import threading
 import sys
 import random
-import shutil
 import os
-
-import numpy as np
-import librosa
 from omegaconf import OmegaConf
 from pathlib import Path
 from datetime import datetime
@@ -25,7 +21,6 @@ from config import (
     DEFAULT_MODEL,
     OUTPUT_DIR,
     UPLOADS_DIR,
-    AUTO_PROMPT_PATH,
     SEPARATOR_MODEL_PATH,
     MLX_WEIGHT_PREFERENCE,
 )
@@ -41,56 +36,15 @@ generations: Dict[str, dict] = {}
 generation_lock = threading.Lock()
 
 # ============================================================================
-# Genre to Auto-Prompt Mapping
+# Paper-Aligned Inference Defaults
 # ============================================================================
 
-GENRE_TO_AUTO_PROMPT = {
-    "pop": "Pop",
-    "r&b": "R&B",
-    "rnb": "R&B",
-    "dance": "Dance",
-    "electronic": "Dance",
-    "edm": "Dance",
-    "jazz": "Jazz",
-    "folk": "Folk",
-    "acoustic": "Folk",
-    "rock": "Rock",
-    "metal": "Metal",
-    "heavy metal": "Metal",
-    "reggae": "Reggae",
-    "chinese": "Chinese Style",
-    "chinese style": "Chinese Style",
-    "chinese tradition": "Chinese Tradition",
-    "chinese opera": "Chinese Opera",
-}
-
-# Stronger conditioning defaults to make outputs follow prompts more closely.
-_STYLE_FOLLOW_MIN_CFG = 2.2
-_STYLE_FOLLOW_MAX_TEMP = 0.7
-_MAX_CANDIDATES = 5
-_SCORING_SECONDS = 30.0
-
-_GENRE_PRESETS = {
-    "hip-hop": {"cfg_coef": 2.6, "temperature": 0.65, "top_k": 60, "top_p": 0.9, "extend_stride": 6},
-    "trap": {"cfg_coef": 2.7, "temperature": 0.62, "top_k": 64, "top_p": 0.92, "extend_stride": 6},
-    "pop": {"cfg_coef": 2.4, "temperature": 0.75, "top_k": 70, "top_p": 0.95, "extend_stride": 5},
-    "r&b": {"cfg_coef": 2.5, "temperature": 0.7, "top_k": 68, "top_p": 0.92, "extend_stride": 5},
-    "rnb": {"cfg_coef": 2.5, "temperature": 0.7, "top_k": 68, "top_p": 0.92, "extend_stride": 5},
-    "rock": {"cfg_coef": 2.3, "temperature": 0.8, "top_k": 72, "top_p": 0.9, "extend_stride": 6},
-    "metal": {"cfg_coef": 2.4, "temperature": 0.78, "top_k": 72, "top_p": 0.9, "extend_stride": 6},
-    "edm": {"cfg_coef": 2.2, "temperature": 0.85, "top_k": 80, "top_p": 0.95, "extend_stride": 7},
-    "dance": {"cfg_coef": 2.2, "temperature": 0.85, "top_k": 80, "top_p": 0.95, "extend_stride": 7},
-}
-
-_GENRE_PRESET_ALIASES = {
-    "hiphop": "hip-hop",
-    "hip hop": "hip-hop",
-    "rap": "hip-hop",
-    "gangster rap": "hip-hop",
-    "trap rap": "trap",
-    "electronic": "edm",
-    "house": "edm",
-    "techno": "edm",
+_PAPER_GEN_PARAMS = {
+    "cfg_coef": 1.5,
+    "temperature": 0.9,
+    "top_k": 50,
+    "top_p": 0.0,
+    "extend_stride": 5,
 }
 
 _TAG_DIR = BASE_DIR / "sample" / "description"
@@ -103,9 +57,12 @@ def _load_tag_list(filename: str) -> set[str]:
     tags = []
     with open(path, "r", encoding="utf-8") as f:
         for line in f:
-            tag = line.strip()
-            if tag:
-                tags.append(tag.lower())
+            tag = " ".join(line.strip().split())
+            if not tag:
+                continue
+            if tag.lower().endswith(" and"):
+                continue
+            tags.append(tag.lower())
     return set(tags)
 
 
@@ -204,6 +161,12 @@ def _normalize_tags(
 ) -> tuple[List[str], List[str]]:
     tags: List[str] = []
     extras: List[str] = []
+    raw = (raw or "").strip()
+    if raw:
+        direct = aliases.get(raw.lower(), raw.lower())
+        if direct in allowed:
+            tags.append(direct)
+            return tags[:max_items] if max_items else tags, extras
     for item in _split_tags(raw):
         key = aliases.get(item.lower(), item.lower())
         if key in allowed:
@@ -286,143 +249,8 @@ def _pick_instrument_tag(bases: set[str], genre_tag: str) -> str:
         return "saxophone"
     return ""
 
-_CANDIDATE_VARIATIONS = [
-    {"cfg": 0.0, "temp": 0.0, "top_k": 0, "top_p": 0.0},
-    {"cfg": 0.2, "temp": -0.05, "top_k": 10, "top_p": 0.05},
-    {"cfg": -0.1, "temp": 0.05, "top_k": -10, "top_p": 0.05},
-    {"cfg": 0.3, "temp": -0.1, "top_k": 20, "top_p": 0.1},
-    {"cfg": -0.2, "temp": 0.1, "top_k": -20, "top_p": 0.1},
-]
-
-
-def _normalize_genre_key(genre: Optional[str]) -> str:
-    if not genre:
-        return ""
-    key = genre.split(",")[0].strip().lower()
-    return _GENRE_PRESET_ALIASES.get(key, key)
-
-
-def _get_genre_preset(genre: Optional[str]) -> Optional[dict]:
-    key = _normalize_genre_key(genre)
-    return _GENRE_PRESETS.get(key)
-
-
-def _clamp(value: float, low: float, high: float) -> float:
-    return max(low, min(high, value))
-
-
-def _resolve_generation_params(request: SongRequest) -> dict:
-    params = {
-        "cfg_coef": float(request.cfg_coef),
-        "temperature": float(request.temperature),
-        "top_k": int(request.top_k),
-        "top_p": float(request.top_p),
-        "extend_stride": int(request.extend_stride),
-    }
-    preset = _get_genre_preset(request.genre) if request.use_genre_presets else None
-    preset_name = _normalize_genre_key(request.genre) if preset else ""
-    if preset:
-        params.update(preset)
-    params["cfg_coef"], params["temperature"] = _apply_style_follow(params["cfg_coef"], params["temperature"])
-    params["top_k"] = int(_clamp(params["top_k"], 1, 100))
-    params["top_p"] = float(_clamp(params["top_p"], 0.0, 0.98))
-    params["extend_stride"] = int(_clamp(params["extend_stride"], 1, 12))
-    return {"params": params, "preset_name": preset_name}
-
-
-def _candidate_params_list(base_params: dict, count: int) -> List[dict]:
-    variations = []
-    for idx in range(count):
-        delta = _CANDIDATE_VARIATIONS[idx % len(_CANDIDATE_VARIATIONS)]
-        params = dict(base_params)
-        params["cfg_coef"] = _clamp(params["cfg_coef"] + delta["cfg"], 0.1, 5.0)
-        params["temperature"] = _clamp(params["temperature"] + delta["temp"], 0.2, 1.2)
-        params["top_k"] = int(_clamp(params["top_k"] + delta["top_k"], 1, 100))
-        params["top_p"] = float(_clamp(params["top_p"] + delta["top_p"], 0.0, 0.98))
-        variations.append(params)
-    return variations
-
-
-def _score_range(value: float, target: float, tol: float) -> float:
-    if tol <= 0:
-        return 0.0
-    return max(0.0, 1.0 - abs(value - target) / tol)
-
-
-def _score_audio_file(path: Path, genre: Optional[str], bpm: Optional[int]) -> dict:
-    try:
-        y, sr = librosa.load(str(path), sr=22050, mono=True, duration=_SCORING_SECONDS)
-    except Exception as exc:
-        return {"score": -1.0, "error": f"load_failed: {exc}"}
-    if y.size == 0:
-        return {"score": -1.0, "error": "empty_audio"}
-
-    abs_y = np.abs(y)
-    rms = float(np.mean(librosa.feature.rms(y=y)))
-    clip_ratio = float(np.mean(abs_y >= 0.98))
-    silence_ratio = float(np.mean(abs_y < 1e-4))
-    dyn = float(np.percentile(abs_y, 95) - np.percentile(abs_y, 5))
-    tempo = None
-    try:
-        tempo = float(librosa.beat.tempo(y=y, sr=sr)[0])
-    except Exception:
-        tempo = None
-
-    low_ratio = None
-    try:
-        stft = np.abs(librosa.stft(y, n_fft=2048, hop_length=512))
-        freqs = librosa.fft_frequencies(sr=sr, n_fft=2048)
-        low_mask = freqs <= 200
-        low_energy = float(stft[low_mask].sum())
-        total_energy = float(stft.sum()) + 1e-9
-        low_ratio = low_energy / total_energy
-    except Exception:
-        low_ratio = None
-
-    score = 0.0
-    score += _score_range(rms, 0.12, 0.08) * 2.0
-    score += _score_range(dyn, 0.2, 0.15) * 1.0
-    score -= clip_ratio * 5.0
-    score -= silence_ratio * 3.0
-
-    if bpm and tempo:
-        score += _score_range(tempo, float(bpm), max(8.0, 0.2 * float(bpm))) * 1.5
-
-    genre_key = _normalize_genre_key(genre)
-    if low_ratio is not None:
-        if genre_key in ("hip-hop", "trap", "r&b"):
-            score += low_ratio * 1.2
-        elif genre_key in ("pop", "edm", "dance"):
-            score += _score_range(low_ratio, 0.28, 0.18) * 0.6
-        elif genre_key in ("rock", "metal"):
-            score += _score_range(low_ratio, 0.2, 0.15) * 0.4
-
-    return {
-        "score": float(score),
-        "rms": rms,
-        "clip_ratio": clip_ratio,
-        "silence_ratio": silence_ratio,
-        "dynamic_range": dyn,
-        "tempo": tempo,
-        "low_ratio": low_ratio,
-    }
-
-
-def _materialize_candidate_output(candidate_files: List[Path], output_dir: Path) -> List[Path]:
-    audio_dir = output_dir / "audios"
-    audio_dir.mkdir(exist_ok=True)
-    copied = []
-    for path in candidate_files:
-        target = audio_dir / path.name
-        shutil.copy2(path, target)
-        copied.append(target)
-    return copied
-
-
-def _apply_style_follow(cfg_coef: float, temperature: float) -> tuple[float, float]:
-    effective_cfg = max(float(cfg_coef), _STYLE_FOLLOW_MIN_CFG)
-    effective_temp = min(float(temperature), _STYLE_FOLLOW_MAX_TEMP)
-    return effective_cfg, effective_temp
+def _resolve_generation_params() -> dict:
+    return dict(_PAPER_GEN_PARAMS)
 
 # ============================================================================
 # Lyrics Normalization (matches official HuggingFace Gradio app)
@@ -438,7 +266,27 @@ LYRICS_FILTER_REGEX = re.compile(
 )
 
 # Section types that have vocals (lyrics should be cleaned)
-VOCAL_SECTION_TYPES = {"verse", "chorus", "bridge", "prechorus"}
+VOCAL_SECTION_TYPES = {"verse", "chorus", "bridge"}
+_ALLOWED_SECTION_BASES = {"intro", "verse", "chorus", "bridge", "inst", "outro"}
+_ALLOWED_DURATION_TAGS = {"short", "medium"}
+
+
+def _normalize_section_type(section_type: str) -> tuple[str, str, Optional[str]]:
+    raw = (section_type or "").strip().lower()
+    if not raw:
+        return "verse", "verse", None
+    parts = raw.split("-", 1)
+    base = parts[0]
+    duration = parts[1] if len(parts) > 1 else None
+    if base not in _ALLOWED_SECTION_BASES:
+        base = "verse"
+        duration = None
+    if base in ("intro", "outro", "inst"):
+        if duration not in _ALLOWED_DURATION_TAGS:
+            duration = "short"
+        tag_type = f"{base}-{duration}"
+        return base, tag_type, duration
+    return base, base, None
 
 
 def clean_lyrics_line(line: str) -> str:
@@ -454,13 +302,24 @@ AUDIO_EXT_PRIORITY = {
 }
 
 
-def _select_weights(model_path: Path) -> Path:
+def _select_weights(model_path: Path, prefer: Optional[str] = None) -> Path:
+    if prefer:
+        preferred = model_path / prefer
+        if preferred.exists():
+            return preferred
     for name in MLX_WEIGHT_PREFERENCE:
         candidate = model_path / name
         if candidate.exists():
             return candidate
     expected = ", ".join(MLX_WEIGHT_PREFERENCE)
     raise FileNotFoundError(f"Model weights not found in {model_path} (expected {expected})")
+
+
+def _is_oom_failure(returncode: int, stdout_text: str, stderr_text: str) -> bool:
+    if returncode < 0 and -returncode in (9, 137):
+        return True
+    merged = f"{stdout_text}\n{stderr_text}".lower()
+    return "out of memory" in merged or "oom" in merged
 
 
 def _pick_preferred_audio_files(audio_files: List[Path]) -> List[Path]:
@@ -527,40 +386,22 @@ def _append_generation_log(
         print(f"[GEN {gen_id}] Warning: failed to write log: {exc}")
 
 
-def _normalize_auto_prompt_type(value: Optional[str]) -> Optional[str]:
-    if value is None:
-        return None
-    cleaned = value.strip()
-    if not cleaned:
-        return None
-    if cleaned.lower() in ("none", "off", "disabled"):
-        return None
-    return cleaned
-
-
 _DURATION_TAG_SECONDS = {
     "short": 6.0,
     "medium": 12.0,
-    "long": 12.0,
 }
 
-_MLX_SAFE_MAX_DURATION = float(os.environ.get("SONGGEN_MLX_MAX_DURATION", "180"))
+_MLX_SAFE_MAX_DURATION = float(os.environ.get("SONGGEN_MLX_MAX_DURATION", "0"))
 
 _BAR_TARGETS = {
     "verse": 2.0,
     "chorus": 2.0,
-    "prechorus": 2.0,
     "bridge": 2.0,
-    "rap": 2.0,
-    "hook": 2.0,
 }
 _WORDS_PER_SEC = {
     "verse": 2.6,
     "chorus": 2.4,
-    "prechorus": 2.5,
     "bridge": 2.5,
-    "rap": 3.2,
-    "hook": 2.5,
 }
 _DEFAULT_BARS_PER_LINE = 2.0
 _DEFAULT_WORDS_PER_SEC = 2.6
@@ -621,14 +462,7 @@ def _estimate_duration(
     total = 0.0
     has_lyrics = False
     for section in sections:
-        base, *rest = section.type.split("-", 1)
-        base = base.lower()
-        duration_tag = rest[0].lower() if rest else ""
-        if duration_tag == "long":
-            duration_tag = "medium"
-        if base == "pre" and duration_tag == "chorus":
-            base = "prechorus"
-            duration_tag = ""
+        base, _, duration_tag = _normalize_section_type(section.type)
         lyrics = (section.lyrics or "").strip()
         use_lyrics = bool(lyrics) and (base not in ("intro", "outro", "inst") or (base in ("intro", "outro") and allow_intro_outro))
         if use_lyrics:
@@ -692,13 +526,7 @@ def build_lyrics_string(sections: List[Section], allow_intro_outro: bool = False
     if allow_intro_outro:
         vocal_types.update({"intro", "outro"})
     for section in sections:
-        # Extract base type (e.g., "verse" from "verse" or "intro" from "intro-short")
-        base_type = section.type.split('-')[0].lower()
-        tag_type = section.type
-        if base_type in ("intro", "outro", "inst") and section.type.endswith("-long"):
-            tag_type = f"{base_type}-medium"
-        elif base_type in ("intro", "outro", "inst") and "-" not in section.type:
-            tag_type = f"{base_type}-short"
+        base_type, tag_type, _ = _normalize_section_type(section.type)
         tag = f"[{tag_type}]"
 
         if section.lyrics and base_type in vocal_types:
@@ -737,7 +565,7 @@ def build_description(request: SongRequest, exclude_genre: bool = False) -> str:
     custom_extras.extend(timbre_extras)
 
     genre_tag = ""
-    if not exclude_genre and request.genre and request.genre != "Auto":
+    if not exclude_genre and request.genre:
         genre_tag, genre_extras = _normalize_genre(request.genre)
         if genre_tag:
             parts.append(genre_tag)
@@ -747,11 +575,16 @@ def build_description(request: SongRequest, exclude_genre: bool = False) -> str:
     parts.extend(emotions)
     custom_extras.extend(emotion_extras)
 
-    bases, instrument_extras = _extract_instrument_bases(request.instruments or "")
-    instrument_tag = _pick_instrument_tag(bases, genre_tag)
-    if instrument_tag and instrument_tag in _TAG_INSTRUMENTS:
-        parts.append(instrument_tag)
-    custom_extras.extend(instrument_extras)
+    instrument_raw = (request.instruments or "").strip()
+    instrument_key = instrument_raw.lower()
+    if instrument_key and instrument_key in _TAG_INSTRUMENTS:
+        parts.append(instrument_key)
+    else:
+        bases, instrument_extras = _extract_instrument_bases(request.instruments or "")
+        instrument_tag = _pick_instrument_tag(bases, genre_tag)
+        if instrument_tag and instrument_tag in _TAG_INSTRUMENTS:
+            parts.append(instrument_tag)
+        custom_extras.extend(instrument_extras)
 
     if request.custom_style:
         custom_extras.append(request.custom_style)
@@ -952,88 +785,51 @@ async def run_generation(
                 "custom_style": request.custom_style,
                 "bpm": request.bpm,
                 "output_mode": request.output_mode,
-                "auto_prompt_type": request.auto_prompt_type,
                 "reference_audio_id": request.reference_audio_id,
-                "use_genre_presets": request.use_genre_presets,
-                "num_candidates": request.num_candidates,
-                "auto_select_best": request.auto_select_best,
-                "arrangement_template": request.arrangement_template,
                 "sections": [
                     {"type": s.type, "lyrics_len": len(s.lyrics or "")} for s in request.sections
                 ],
             },
         )
 
+        allow_intro_outro = False
         lyrics = build_lyrics_string(
             request.sections,
-            allow_intro_outro=request.allow_intro_outro_lyrics,
+            allow_intro_outro=allow_intro_outro,
         )
-
-        if reference_path and request.auto_prompt_type:
-            raise Exception("auto_prompt_type cannot be used with reference audio")
 
         input_data = {
             "idx": gen_id,
             "gt_lyric": lyrics,
         }
 
-        description = ""
-        resolved = _resolve_generation_params(request)
-        gen_params = resolved["params"]
-        preset_name = resolved["preset_name"]
+        description = build_description(request, exclude_genre=False)
+        gen_params = _resolve_generation_params()
+
+        used_description = description
+        if reference_path and used_description:
+            prompt_source = "text+reference"
+        elif reference_path:
+            prompt_source = "reference"
+        elif used_description:
+            prompt_source = "text"
+        else:
+            prompt_source = "lyrics"
 
         if reference_path:
             input_data["prompt_audio_path"] = reference_path
-        else:
-            auto_type = _normalize_auto_prompt_type(request.auto_prompt_type)
-            auto_type_provided = auto_type is not None and request.auto_prompt_type is not None
-            genre_for_auto_prompt = None
-            auto_prompt_source = "none"
-
-            genre_value = (request.genre or "").strip()
-            has_genre = bool(genre_value) and genre_value.lower() != "auto"
-            first_genre = ""
-            if has_genre:
-                first_genre = genre_value.split(',')[0].strip().lower()
-                if not auto_type_provided:
-                    if first_genre in GENRE_TO_AUTO_PROMPT:
-                        auto_type = GENRE_TO_AUTO_PROMPT[first_genre]
-                        genre_for_auto_prompt = first_genre
-                        auto_prompt_source = "genre_map"
-                    else:
-                        auto_type = "Auto"
-                        auto_prompt_source = "default"
-                else:
-                    auto_prompt_source = "explicit"
-            else:
-                if auto_type is None:
-                    auto_type = "Auto"
-                    auto_prompt_source = "default"
-                else:
-                    auto_prompt_source = "explicit"
-
-            if auto_type:
-                input_data["auto_prompt_audio_type"] = auto_type
-
-            exclude_genre = genre_for_auto_prompt is not None
-            description = build_description(request, exclude_genre=exclude_genre)
-
-            if description:
-                input_data["descriptions"] = description
-
-            _append_generation_log(
-                output_subdir,
-                gen_id,
-                "Auto prompt selection",
-                {
-                    "auto_prompt_type": auto_type,
-                    "auto_prompt_source": auto_prompt_source,
-                    "genre_value": genre_value,
-                    "first_genre": first_genre,
-                    "exclude_genre": exclude_genre,
-                    "description": description,
-                },
-            )
+        if used_description:
+            input_data["descriptions"] = used_description
+        _append_generation_log(
+            output_subdir,
+            gen_id,
+            "Prompt inputs",
+            {
+                "prompt_source": prompt_source,
+                "has_reference": bool(reference_path),
+                "description": used_description,
+            },
+        )
 
         input_data["cfg_coef"] = gen_params["cfg_coef"]
         input_data["temperature"] = gen_params["temperature"]
@@ -1051,35 +847,6 @@ async def run_generation(
             {"lyrics_preview": lyrics[:400], "input_data": input_data},
         )
 
-        if (
-            gen_params["cfg_coef"] != request.cfg_coef
-            or gen_params["temperature"] != request.temperature
-            or gen_params["top_k"] != request.top_k
-            or gen_params["top_p"] != request.top_p
-            or gen_params["extend_stride"] != request.extend_stride
-            or preset_name
-        ):
-            _append_generation_log(
-                output_subdir,
-                gen_id,
-                "Parameter adjustment",
-                {
-                    "requested_cfg": request.cfg_coef,
-                    "requested_temperature": request.temperature,
-                    "requested_top_k": request.top_k,
-                    "requested_top_p": request.top_p,
-                    "requested_extend_stride": request.extend_stride,
-                    "effective_cfg": gen_params["cfg_coef"],
-                    "effective_temperature": gen_params["temperature"],
-                    "effective_top_k": gen_params["top_k"],
-                    "effective_top_p": gen_params["top_p"],
-                    "effective_extend_stride": gen_params["extend_stride"],
-                    "min_cfg": _STYLE_FOLLOW_MIN_CFG,
-                    "max_temperature": _STYLE_FOLLOW_MAX_TEMP,
-                    "genre_preset": preset_name,
-                },
-            )
-
         with open(input_file, 'w', encoding='utf-8') as f:
             json.dump(input_data, f, ensure_ascii=False)
             f.write('\n')
@@ -1092,9 +859,6 @@ async def run_generation(
                     f"Separator model not found (expected {SEPARATOR_MODEL_PATH} or {SEPARATOR_MODEL_PATH.with_suffix('.mlpackage')})"
                 )
 
-        if not reference_path and not AUTO_PROMPT_PATH.exists():
-            raise Exception(f"Auto prompt file not found: {AUTO_PROMPT_PATH}")
-
         generations[gen_id]["message"] = "Loading Model..."
         generations[gen_id]["progress"] = 10
         notify_generation_update(gen_id, generations[gen_id])
@@ -1106,7 +870,7 @@ async def run_generation(
         duration = _estimate_duration(
             request.sections,
             model_path,
-            allow_intro_outro=request.allow_intro_outro_lyrics,
+            allow_intro_outro=allow_intro_outro,
             bpm=request.bpm,
         )
         if _MLX_SAFE_MAX_DURATION > 0 and duration > _MLX_SAFE_MAX_DURATION:
@@ -1118,22 +882,20 @@ async def run_generation(
             )
             duration = _MLX_SAFE_MAX_DURATION
 
-        def build_cmd(save_dir: Path, params: dict, seed: Optional[int]) -> List[str]:
+        def build_cmd(save_dir: Path, params: dict, seed: Optional[int], weights: Path) -> List[str]:
             cmd = [
                 sys.executable,
                 str(BASE_DIR / "generate_mlx.py"),
                 "--ckpt_path",
                 str(model_path),
                 "--weights",
-                str(weights_path),
+                str(weights),
                 "--input_jsonl",
                 str(input_file),
                 "--save_dir",
                 str(save_dir),
                 "--generate_type",
                 gen_type,
-                "--auto_prompt_path",
-                str(AUTO_PROMPT_PATH),
                 "--duration",
                 str(duration),
                 "--cfg_coef",
@@ -1158,35 +920,7 @@ async def run_generation(
                 ]
             return cmd
 
-        candidate_count = max(1, min(int(request.num_candidates or 1), _MAX_CANDIDATES))
-        candidate_params = _candidate_params_list(gen_params, candidate_count)
-        candidates_dir = output_subdir / "candidates"
-        if candidate_count > 1:
-            candidates_dir.mkdir(exist_ok=True)
-
-        candidate_results = []
-        total_gen_time = 0.0
-
-        for idx in range(candidate_count):
-            candidate_id = f"cand_{idx + 1:02d}"
-            candidate_dir = candidates_dir / candidate_id if candidate_count > 1 else output_subdir
-            candidate_dir.mkdir(exist_ok=True)
-            seed = random.randint(0, 2**31 - 1)
-            params = candidate_params[idx]
-            cmd = build_cmd(candidate_dir, params, seed)
-
-            _append_generation_log(
-                output_subdir,
-                gen_id,
-                "Candidate command",
-                {"candidate": candidate_id, "seed": seed, "params": params, "cmd": cmd},
-            )
-
-            generations[gen_id]["message"] = f"Generating music (take {idx + 1}/{candidate_count})..."
-            generations[gen_id]["progress"] = 35 + int((idx / max(1, candidate_count)) * 40)
-            generations[gen_id]["stage"] = "generating"
-            notify_generation_update(gen_id, generations[gen_id])
-
+        async def run_mlx_cmd(cmd: List[str], candidate_id: str, attempt: str) -> tuple[int, str, str, float]:
             start_time = time.time()
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
@@ -1195,15 +929,15 @@ async def run_generation(
                 stderr=asyncio.subprocess.PIPE,
             )
             stdout, stderr = await proc.communicate()
-            candidate_time = time.time() - start_time
-            total_gen_time += candidate_time
+            elapsed = time.time() - start_time
 
             stdout_text = stdout.decode("utf-8", errors="ignore").strip() if stdout else ""
             stderr_text = stderr.decode("utf-8", errors="ignore").strip() if stderr else ""
+            label = f"{candidate_id}::{attempt}"
             if stdout_text:
-                print(f"[GEN {gen_id}] MLX output ({candidate_id}):\n{stdout_text}")
+                print(f"[GEN {gen_id}] MLX output ({label}):\n{stdout_text}")
             if stderr_text:
-                print(f"[GEN {gen_id}] MLX error output ({candidate_id}):\n{stderr_text}")
+                print(f"[GEN {gen_id}] MLX error output ({label}):\n{stderr_text}")
 
             _append_generation_log(
                 output_subdir,
@@ -1211,84 +945,44 @@ async def run_generation(
                 "Candidate output",
                 {
                     "candidate": candidate_id,
+                    "attempt": attempt,
                     "stdout": stdout_text,
                     "stderr": stderr_text,
                     "returncode": proc.returncode,
-                    "elapsed_seconds": candidate_time,
+                    "elapsed_seconds": elapsed,
                 },
             )
+            return proc.returncode, stdout_text, stderr_text, elapsed
 
-            if proc.returncode != 0:
-                error_detail = stderr_text or stdout_text or "unknown error"
-                if proc.returncode < 0:
-                    signal_id = -proc.returncode
-                    error_detail = f"process_killed_signal_{signal_id} (possible OOM)."
-                    if stderr_text:
-                        error_detail = f"{error_detail} {stderr_text}"
-                candidate_results.append({
-                    "id": candidate_id,
-                    "status": "failed",
-                    "error": error_detail,
-                })
-                continue
-
-            output_files = _collect_audio_files([candidate_dir / "audios", candidate_dir])
-            if not output_files:
-                candidate_results.append({
-                    "id": candidate_id,
-                    "status": "failed",
-                    "error": "no_output_files",
-                })
-                continue
-
-            score_info = _score_audio_file(output_files[0], request.genre, request.bpm)
-            _append_generation_log(
-                output_subdir,
-                gen_id,
-                "Candidate score",
-                {"candidate": candidate_id, "score_details": score_info},
-            )
-            candidate_results.append({
-                "id": candidate_id,
-                "status": "ok",
-                "seed": seed,
-                "params": params,
-                "score": score_info.get("score", -1.0),
-                "score_details": score_info,
-                "output_files": output_files,
-            })
-
-        successful = [c for c in candidate_results if c.get("status") == "ok"]
-        if not successful:
-            details = candidate_results[-1].get("error") if candidate_results else "unknown error"
-            raise Exception(f"MLX generation failed: {details}")
-
-        chosen = successful[0]
-        if candidate_count > 1 and request.auto_select_best:
-            chosen = max(successful, key=lambda c: c.get("score", -1.0))
-
+        seed = random.randint(0, 2**31 - 1)
+        cmd = build_cmd(output_subdir, gen_params, seed, weights_path)
         _append_generation_log(
             output_subdir,
             gen_id,
-            "Candidate selection",
-            {
-                "auto_select_best": request.auto_select_best,
-                "chosen": chosen.get("id"),
-                "scores": [
-                    {"id": c.get("id"), "score": c.get("score"), "status": c.get("status")}
-                    for c in candidate_results
-                ],
-            },
+            "Generation command",
+            {"seed": seed, "params": gen_params, "cmd": cmd},
         )
 
-        if candidate_count > 1:
-            output_files = _materialize_candidate_output(chosen["output_files"], output_subdir)
-        else:
-            output_files = chosen["output_files"]
+        generations[gen_id]["message"] = "Generating music..."
+        generations[gen_id]["progress"] = 45
+        generations[gen_id]["stage"] = "generating"
+        notify_generation_update(gen_id, generations[gen_id])
+
+        ret, stdout_text, stderr_text, gen_time = await run_mlx_cmd(
+            cmd, "main", "primary"
+        )
+        if ret != 0:
+            error_detail = stderr_text or stdout_text or "unknown error"
+            if ret < 0:
+                signal_id = -ret
+                error_detail = f"process_killed_signal_{signal_id} (possible OOM)."
+                if stderr_text:
+                    error_detail = f"{error_detail} {stderr_text}"
+            raise Exception(f"MLX generation failed: {error_detail}")
+
+        output_files = _collect_audio_files([output_subdir / "audios", output_subdir])
         if not output_files:
             raise Exception("No output files generated")
-
-        gen_time = total_gen_time
 
         track_labels = []
         if gen_type == 'separate' and len(output_files) >= 3:
@@ -1319,16 +1013,6 @@ async def run_generation(
         generations[gen_id]["output_mode"] = gen_type
         generations[gen_id]["completed_at"] = datetime.now().isoformat()
         generations[gen_id]["duration"] = audio_duration
-        generations[gen_id]["candidates"] = [
-            {
-                "id": c.get("id"),
-                "status": c.get("status"),
-                "score": c.get("score"),
-                "seed": c.get("seed"),
-                "params": c.get("params"),
-            }
-            for c in candidate_results
-        ]
 
         await notify_models_update()
 
@@ -1360,26 +1044,13 @@ async def run_generation(
                 "total_lyrics_length": total_lyrics_length,
                 "used_model_server": False,
                 "reference_audio_id": request.reference_audio_id,
+                "prompt_source": prompt_source,
+                "description": used_description,
                 "cfg_coef": gen_params["cfg_coef"],
                 "temperature": gen_params["temperature"],
                 "top_k": gen_params["top_k"],
                 "top_p": gen_params["top_p"],
                 "extend_stride": gen_params["extend_stride"],
-                "genre_preset": preset_name,
-                "use_genre_presets": request.use_genre_presets,
-                "arrangement_template": request.arrangement_template,
-                "num_candidates": candidate_count,
-                "auto_select_best": request.auto_select_best,
-                "candidates": [
-                    {
-                        "id": c.get("id"),
-                        "status": c.get("status"),
-                        "score": c.get("score"),
-                        "seed": c.get("seed"),
-                        "params": c.get("params"),
-                    }
-                    for c in candidate_results
-                ],
             }
             with open(metadata_path, 'w', encoding='utf-8') as f:
                 json.dump(metadata, f, indent=2, ensure_ascii=False)

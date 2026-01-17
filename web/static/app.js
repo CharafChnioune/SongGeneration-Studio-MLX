@@ -14,38 +14,6 @@ var App = () => {
     const [customStyle, setCustomStyle] = useState('');
     const [bpm, setBpm] = useState(120);
     const [outputMode, setOutputMode] = useState(localStorage.getItem('output_mode') || 'mixed');
-    const [arrangementTemplate, setArrangementTemplate] = useState(localStorage.getItem('arrangement_template') || 'auto');
-    const [autoArrange, setAutoArrange] = useState(localStorage.getItem('auto_arrange') === 'true');
-    const [numCandidates, setNumCandidates] = useState(parseInt(localStorage.getItem('num_candidates') || String(ADVANCED_DEFAULTS.numCandidates), 10));
-    const [autoSelectBest, setAutoSelectBest] = useState(localStorage.getItem('auto_select_best') !== 'false');
-    const [useGenrePresets, setUseGenrePresets] = useState(localStorage.getItem('use_genre_presets') !== 'false');
-
-    // AI settings
-    const [lyricsProvider, setLyricsProvider] = useState(localStorage.getItem('lyrics_provider') || 'lmstudio');
-    const [lyricsBaseUrl, setLyricsBaseUrl] = useState(localStorage.getItem('lyrics_base_url') || 'http://localhost:1234/v1');
-    const [lyricsModel, setLyricsModel] = useState(localStorage.getItem('lyrics_model') || '');
-    const [lyricsPrompt, setLyricsPrompt] = useState('');
-    const [lyricsLanguage, setLyricsLanguage] = useState(localStorage.getItem('lyrics_language') || 'English');
-    const [lyricsLength, setLyricsLength] = useState(localStorage.getItem('lyrics_length') || 'full');
-    const [lyricsBusy, setLyricsBusy] = useState(false);
-    const [lyricsError, setLyricsError] = useState(null);
-    const [lyricsModels, setLyricsModels] = useState([]);
-    const [lyricsModelsLoading, setLyricsModelsLoading] = useState(false);
-    const [lyricsModelsError, setLyricsModelsError] = useState(null);
-    const lyricsProviderRef = useRef(lyricsProvider);
-
-    // AI
-    const [styleBusy, setStyleBusy] = useState(false);
-    const [styleError, setStyleError] = useState(null);
-    const [autoCreateBusy, setAutoCreateBusy] = useState(false);
-
-    // Advanced settings
-    const [cfgCoef, setCfgCoef] = useState(ADVANCED_DEFAULTS.cfgCoef);
-    const [temperature, setTemperature] = useState(ADVANCED_DEFAULTS.temperature);
-    const [topK, setTopK] = useState(ADVANCED_DEFAULTS.topK);
-    const [topP, setTopP] = useState(ADVANCED_DEFAULTS.topP);
-    const [extendStride, setExtendStride] = useState(ADVANCED_DEFAULTS.extendStride);
-    const [showAdvanced, setShowAdvanced] = useState(false);
 
     // Generation state
     const [generating, setGenerating] = useState(false);
@@ -65,9 +33,7 @@ var App = () => {
 
     // Reference audio
     const [refId, setRefId] = useState(null);
-    const [refFile, setRefFile] = useState(null);
-    const [useReference, setUseReference] = useState(false);
-    const [refFileLoaded, setRefFileLoaded] = useState(false);
+    const hasReference = Boolean(refId);
 
     // UI state
     const [showAddMenu, setShowAddMenu] = useState(false);
@@ -102,7 +68,7 @@ var App = () => {
     const formatDownloadDetails = (model) => {
         if (!model) return '';
         const parts = [];
-        const totalGb = model.download_total_gb || model.size_gb;
+        const totalGb = model.download_total_gb || model.total_gb || model.size_gb;
         if (totalGb) {
             const downloaded = Number(model.downloaded_gb || 0).toFixed(2);
             const total = Number(totalGb).toFixed(1);
@@ -120,56 +86,8 @@ var App = () => {
         return parts.join(' | ');
     };
 
-    useEffect(() => { localStorage.setItem('lyrics_provider', lyricsProvider); }, [lyricsProvider]);
-    useEffect(() => { localStorage.setItem('lyrics_base_url', lyricsBaseUrl); }, [lyricsBaseUrl]);
-    useEffect(() => { localStorage.setItem('lyrics_model', lyricsModel); }, [lyricsModel]);
-    useEffect(() => { localStorage.setItem('lyrics_language', lyricsLanguage); }, [lyricsLanguage]);
-    useEffect(() => { localStorage.setItem('lyrics_length', lyricsLength); }, [lyricsLength]);
     useEffect(() => { localStorage.setItem('output_mode', outputMode); }, [outputMode]);
-    useEffect(() => { localStorage.setItem('arrangement_template', arrangementTemplate); }, [arrangementTemplate]);
-    useEffect(() => { localStorage.setItem('auto_arrange', autoArrange ? 'true' : 'false'); }, [autoArrange]);
-    useEffect(() => { localStorage.setItem('num_candidates', String(numCandidates)); }, [numCandidates]);
-    useEffect(() => { localStorage.setItem('auto_select_best', autoSelectBest ? 'true' : 'false'); }, [autoSelectBest]);
-    useEffect(() => { localStorage.setItem('use_genre_presets', useGenrePresets ? 'true' : 'false'); }, [useGenrePresets]);
 
-    useEffect(() => {
-        const defaults = { lmstudio: 'http://localhost:1234/v1', ollama: 'http://localhost:11434' };
-        const prev = lyricsProviderRef.current;
-        if (prev !== lyricsProvider) {
-            const prevDefault = defaults[prev];
-            const nextDefault = defaults[lyricsProvider] || defaults.lmstudio;
-            if (!lyricsBaseUrl || lyricsBaseUrl === prevDefault) {
-                setLyricsBaseUrl(nextDefault);
-            }
-            lyricsProviderRef.current = lyricsProvider;
-        }
-    }, [lyricsProvider, lyricsBaseUrl]);
-
-    const refreshLyricsModels = async () => {
-        if (!lyricsBaseUrl) return;
-        setLyricsModelsLoading(true);
-        setLyricsModelsError(null);
-        try {
-            const result = await fetchLyricsModels({ provider: lyricsProvider, base_url: lyricsBaseUrl });
-            const models = Array.isArray(result.models) ? result.models : [];
-            setLyricsModels(models);
-            if (models.length > 0 && (!lyricsModel || !models.includes(lyricsModel))) {
-                setLyricsModel(models[0]);
-            }
-        } catch (e) {
-            setLyricsModels([]);
-            setLyricsModelsError(e.message || 'Failed to fetch models');
-        } finally {
-            setLyricsModelsLoading(false);
-        }
-    };
-
-    useEffect(() => {
-        const timer = setTimeout(() => {
-            refreshLyricsModels();
-        }, 500);
-        return () => clearTimeout(timer);
-    }, [lyricsProvider, lyricsBaseUrl]);
 
     // Load initial data
     useEffect(() => {
@@ -239,14 +157,6 @@ var App = () => {
     // This is set automatically in hooks.js when loadModels() is called
 
     // Output mode is user-controlled; do not auto-switch.
-
-    // Auto-arrange templates when genre changes and no lyrics exist yet.
-    useEffect(() => {
-        if (!autoArrange) return;
-        const hasLyrics = sections.some(s => s.lyrics?.trim().length > 0);
-        if (hasLyrics) return;
-        applyArrangementTemplate('auto', { silent: true });
-    }, [genres, autoArrange]);
 
     // Restore running generation on page load or when queue item starts
     useEffect(() => {
@@ -616,333 +526,24 @@ var App = () => {
     useEffect(() => { cleanupRef.current = cleanupGeneration; }, [cleanupGeneration]);
 
     const createPayload = () => ({
-        title, sections: sections.map(s => ({ type: s.type, lyrics: s.lyrics || null })),
-        gender, genre: genres.join(', '), emotion: moods.join(', '), timbre: timbres.join(', '),
-        instruments: instruments.join(', '), custom_style: customStyle, bpm, output_mode: outputMode,
-        model: modelState.selectedModel, reference_audio_id: useReference ? refId : null,
-        cfg_coef: cfgCoef, temperature, top_k: topK, top_p: topP, extend_stride: extendStride,
-        allow_intro_outro_lyrics: false,
-        use_genre_presets: useGenrePresets,
-        num_candidates: numCandidates,
-        auto_select_best: autoSelectBest,
-        arrangement_template: arrangementTemplate,
-    });
-
-    const buildStyleDescriptionFromValues = (values) => {
-        const {
-            gender: g,
-            timbres: t,
-            genres: ge,
-            moods: mo,
-            instruments: ins,
-            customStyle: cs,
-            bpm: bpmValue,
-        } = values;
-        const parts = [];
-        if (g && g !== 'auto') parts.push(g);
-        if (t && t.length) parts.push(t.join(', '));
-        if (ge && ge.length) parts.push(ge.join(', '));
-        if (mo && mo.length) parts.push(mo.join(', '));
-        if (ins && ins.length) parts.push(ins.join(', '));
-        if (cs) parts.push(cs);
-        if (bpmValue) parts.push(`the bpm is ${bpmValue}`);
-        return parts.join(', ');
-    };
-
-    const buildStyleDescription = () => buildStyleDescriptionFromValues({
+        title,
+        sections: sections.map(s => ({ type: s.type, lyrics: s.lyrics || null })),
         gender,
-        timbres,
-        genres,
-        moods,
-        instruments,
-        customStyle,
+        genre: genres.join(', '),
+        emotion: moods.join(', '),
+        timbre: timbres.join(', '),
+        instruments: instruments.join(', '),
+        custom_style: customStyle,
         bpm,
+        output_mode: outputMode,
+        model: modelState.selectedModel,
+        reference_audio_id: refId || null,
     });
 
     const splitTagList = (value) => {
         if (!value) return [];
         if (Array.isArray(value)) return value.map(v => String(v).trim()).filter(Boolean);
         return String(value).split(',').map(v => v.trim()).filter(Boolean);
-    };
-
-    const normalizeGenreKey = (value) => {
-        if (!value) return '';
-        const raw = value.toLowerCase().trim();
-        if (raw === 'r&b') return 'r&b';
-        if (raw === 'rnb') return 'rnb';
-        return raw;
-    };
-
-    const resolveTemplate = (templateId, genreList) => {
-        if (templateId === 'auto') {
-            const first = genreList && genreList.length ? normalizeGenreKey(genreList[0]) : '';
-            const mapped = GENRE_TO_TEMPLATE[first] || 'pop_hit';
-            return ARRANGEMENT_TEMPLATES.find(t => t.id === mapped) || ARRANGEMENT_TEMPLATES[1];
-        }
-        return ARRANGEMENT_TEMPLATES.find(t => t.id === templateId);
-    };
-
-    const applyArrangementTemplate = (templateId, { silent } = {}) => {
-        const template = resolveTemplate(templateId, genres);
-        if (!template || !Array.isArray(template.sections) || template.sections.length === 0) return;
-        const newSections = template.sections.map((type, idx) => ({
-            id: `${Date.now()}-${idx}`,
-            type,
-            lyrics: '',
-        }));
-        setSections(newSections);
-        setArrangementTemplate(templateId);
-        if (!silent) setShowAddMenu(false);
-    };
-
-    const buildSectionList = (sectionTypes) => {
-        if (!Array.isArray(sectionTypes) || sectionTypes.length === 0) return null;
-        return sectionTypes.map((type, idx) => ({
-            id: `${Date.now()}-${idx}`,
-            type,
-            lyrics: '',
-        }));
-    };
-
-    const collectLyricsText = () => {
-        const chunks = sections.map(s => {
-            const label = s.type || 'section';
-            const body = (s.lyrics || '').trim();
-            return body ? `[${label}] ${body}` : '';
-        }).filter(Boolean);
-        return chunks.join('\n');
-    };
-
-    const applyStyleResult = (result) => {
-        if (!result || typeof result !== 'object') return;
-        if (result.genre) setGenres([result.genre]);
-        if (Array.isArray(result.moods) && result.moods.length) setMoods(result.moods);
-        if (Array.isArray(result.timbres) && result.timbres.length) setTimbres(result.timbres);
-        if (Array.isArray(result.instruments) && result.instruments.length) setInstruments(result.instruments);
-        if (typeof result.bpm === 'number' && !Number.isNaN(result.bpm)) setBpm(result.bpm);
-        if (typeof result.custom_style === 'string') setCustomStyle(result.custom_style);
-        if (result.gender && ['male', 'female', 'auto'].includes(result.gender)) setGender(result.gender);
-    };
-
-    const runStyleGeneration = async () => {
-        if (!lyricsModel) { setStyleError('Model is required'); return; }
-        setStyleBusy(true);
-        setStyleError(null);
-        try {
-            const payload = {
-                provider: lyricsProvider,
-                base_url: lyricsBaseUrl,
-                model: lyricsModel,
-                seed_words: lyricsPrompt,
-                title,
-                lyrics: collectLyricsText(),
-                language: lyricsLanguage,
-                target_genre: genres.length ? genres[0] : '',
-            };
-            const result = await generateStyle(payload);
-            applyStyleResult(result);
-        } catch (e) {
-            setStyleError(e.message || 'Failed to generate style');
-        } finally {
-            setStyleBusy(false);
-        }
-    };
-
-    const buildLyricsSections = (sourceSections) => (sourceSections || sections).map(s => {
-        const { base } = fromApiType(s.type);
-        const cfg = SECTION_TYPES[base] || { hasLyrics: true };
-        return { type: s.type, has_lyrics: cfg.hasLyrics, lyrics: s.lyrics || '' };
-    });
-
-    const applyGeneratedLyrics = (respSections, baseSections) => {
-        if (!Array.isArray(respSections)) return;
-        const source = baseSections || sections;
-        setSections(source.map((s, idx) => {
-            const updated = respSections[idx];
-            if (!updated) return s;
-            return { ...s, lyrics: updated.lyrics || '' };
-        }));
-    };
-
-    const runLyricsGeneration = async (mode, options = {}) => {
-        if (!lyricsModel) { setLyricsError('Model is required'); return; }
-        setLyricsBusy(true);
-        setLyricsError(null);
-        try {
-            const maxTokensByLength = { short: 800, medium: 1400, full: 2000 };
-            const maxTokens = maxTokensByLength[lyricsLength] || 1000;
-            const sectionsForLyrics = options.sections || sections;
-            const payload = {
-                provider: lyricsProvider,
-                base_url: lyricsBaseUrl,
-                model: lyricsModel,
-                seed_words: lyricsPrompt,
-                sections: buildLyricsSections(sectionsForLyrics),
-                mode,
-                style: options.style || buildStyleDescription(),
-                language: lyricsLanguage,
-                length: lyricsLength,
-                temperature: 0.7,
-                top_p: 0.9,
-                max_tokens: maxTokens,
-            };
-            const result = await generateLyrics(payload);
-            applyGeneratedLyrics(result.sections || [], sectionsForLyrics);
-        } catch (e) {
-            setLyricsError(e.message || 'Failed to generate lyrics');
-        } finally {
-            setLyricsBusy(false);
-        }
-    };
-
-    const runAutoCreate = async () => {
-        if (!lyricsModel) { setStyleError('Model is required'); return; }
-        setAutoCreateBusy(true);
-        setStyleBusy(true);
-        setLyricsBusy(true);
-        setStyleError(null);
-        setLyricsError(null);
-        try {
-            const stylePayload = {
-                provider: lyricsProvider,
-                base_url: lyricsBaseUrl,
-                model: lyricsModel,
-                seed_words: lyricsPrompt,
-                title,
-                lyrics: collectLyricsText(),
-                language: lyricsLanguage,
-                target_genre: genres.length ? genres[0] : '',
-            };
-            const styleResult = await generateStyle(stylePayload);
-            applyStyleResult(styleResult);
-
-            const mergedStyle = {
-                gender: styleResult.gender || gender,
-                timbres: (styleResult.timbres && styleResult.timbres.length) ? styleResult.timbres : timbres,
-                genres: styleResult.genre ? [styleResult.genre] : genres,
-                moods: (styleResult.moods && styleResult.moods.length) ? styleResult.moods : moods,
-                instruments: (styleResult.instruments && styleResult.instruments.length) ? styleResult.instruments : instruments,
-                customStyle: styleResult.custom_style || customStyle,
-                bpm: (typeof styleResult.bpm === 'number' ? styleResult.bpm : bpm),
-            };
-            const styleText = buildStyleDescriptionFromValues(mergedStyle);
-
-            const mergedGenres = mergedStyle.genres || genres;
-            const template = resolveTemplate(arrangementTemplate, mergedGenres);
-            const sectionTemplate = template && template.sections?.length ? template.sections : null;
-            let baseSections = sections;
-            let usedStructure = false;
-
-            if (arrangementTemplate === 'auto') {
-                try {
-                    const structurePayload = {
-                        provider: lyricsProvider,
-                        base_url: lyricsBaseUrl,
-                        model: lyricsModel,
-                        seed_words: lyricsPrompt,
-                        title,
-                        language: lyricsLanguage,
-                        target_genre: mergedGenres && mergedGenres.length ? mergedGenres[0] : '',
-                        style: styleText,
-                        length: lyricsLength,
-                    };
-                    const structureResult = await generateStructure(structurePayload);
-                    const aiSections = buildSectionList(structureResult.sections || []);
-                    if (aiSections && aiSections.length) {
-                        baseSections = aiSections;
-                        setSections(baseSections);
-                        usedStructure = true;
-                    }
-                } catch (e) {
-                    console.warn('[AI-STRUCTURE] Failed, falling back to template:', e);
-                }
-            }
-
-            if (!usedStructure && sectionTemplate) {
-                baseSections = buildSectionList(sectionTemplate) || baseSections;
-                setSections(baseSections);
-            }
-
-            await runLyricsGeneration('generate', { sections: baseSections, style: styleText });
-        } catch (e) {
-            const message = e.message || 'Failed to auto create';
-            setStyleError(message);
-        } finally {
-            setStyleBusy(false);
-            setLyricsBusy(false);
-            setAutoCreateBusy(false);
-        }
-    };
-
-    const handleRemix = async (item, options) => {
-        if (!lyricsModel) throw new Error('Model is required');
-        if (!modelState.hasReadyModel || modelState.models.length === 0) {
-            throw new Error('No models downloaded. Please download a model first.');
-        }
-        const meta = item.metadata || {};
-        const sourceSections = meta.sections || item.sections || [];
-        if (!Array.isArray(sourceSections) || sourceSections.length === 0) {
-            throw new Error('No sections available to remix');
-        }
-        const remixSections = sourceSections.map(s => {
-            const type = s.type || 'verse';
-            const { base } = fromApiType(type);
-            const cfg = SECTION_TYPES[base] || { hasLyrics: true };
-            return { type, has_lyrics: cfg.hasLyrics, lyrics: s.lyrics || '' };
-        });
-        const remixPayload = {
-            provider: lyricsProvider,
-            base_url: lyricsBaseUrl,
-            model: lyricsModel,
-            song_model: meta.model || modelState.selectedModel || 'songgeneration_base',
-            prompt: options.prompt,
-            title: meta.title || item.title || 'Untitled',
-            language: lyricsLanguage,
-            sections: remixSections,
-            genre: meta.genre || '',
-            moods: splitTagList(meta.emotion),
-            timbres: splitTagList(meta.timbre),
-            instruments: splitTagList(meta.instruments),
-            bpm: meta.bpm || bpm,
-            gender: meta.gender || gender,
-            custom_style: meta.custom_style || customStyle,
-            output_mode: meta.output_mode || item.output_mode || outputMode,
-            reference_audio_id: options.keepReference ? (meta.reference_audio_id || null) : null,
-            arrangement_template: meta.arrangement_template || arrangementTemplate,
-            advanced: {
-                cfg_coef: meta.cfg_coef ?? cfgCoef,
-                temperature: meta.temperature ?? temperature,
-                top_k: meta.top_k ?? topK,
-                top_p: meta.top_p ?? topP,
-                extend_stride: meta.extend_stride ?? extendStride,
-                use_genre_presets: meta.use_genre_presets ?? useGenrePresets,
-                num_candidates: meta.num_candidates ?? numCandidates,
-                auto_select_best: meta.auto_select_best ?? autoSelectBest,
-            },
-            length: lyricsLength,
-        };
-        const result = await generateRemix(remixPayload);
-        const payload = result.payload;
-        if (!payload) throw new Error('Remix returned no payload');
-
-        let modelToUse = payload.model;
-        if (!modelState.models.some(m => m.id === modelToUse && m.status === 'ready')) {
-            const firstReady = modelState.models.find(m => m.status === 'ready');
-            if (firstReady) {
-                modelToUse = firstReady.id;
-                payload.model = modelToUse;
-            } else {
-                throw new Error('No models ready.');
-            }
-        }
-
-        if (generating) {
-            await addToQueue(payload);
-            await loadQueue();
-        } else {
-            setGenerating(true);
-            doStartGeneration(payload);
-        }
     };
 
     const doStartGeneration = async (payload) => {
@@ -956,8 +557,7 @@ var App = () => {
         const freshStats = await fetchTimingStats();
         setTimingStats(freshStats);
         const baseEstimate = calculateEstimate(freshStats, payload.model, payload.sections, Boolean(payload.reference_audio_id));
-        const multiplier = Math.max(1, payload.num_candidates || 1);
-        setEstimatedTime(baseEstimate * multiplier);
+        setEstimatedTime(baseEstimate);
         setElapsedTime(0);
         console.log('[START-GEN] Starting elapsed time counter');
         timerRef.current = setInterval(() => setElapsedTime(prev => prev + 1), 1000);
@@ -1074,8 +674,8 @@ var App = () => {
     }, [showAddMenu]);
 
     // Duration widths for resizable sections
-    const DURATION_WIDTHS = { short: 68, medium: 88, long: 110 };
-    const DURATION_THRESHOLDS = { short: 78, medium: 99 };
+    const DURATION_WIDTHS = { short: 68, medium: 92 };
+    const DURATION_THRESHOLDS = { medium: 82 };
 
     // Resize state
     const [resizingId, setResizingId] = useState(null);
@@ -1091,9 +691,7 @@ var App = () => {
     };
 
     const updateDurationFromWidth = (sectionId, newWidth) => {
-        let newDuration = 'short';
-        if (newWidth >= DURATION_THRESHOLDS.medium) newDuration = 'long';
-        else if (newWidth >= DURATION_THRESHOLDS.short) newDuration = 'medium';
+        const newDuration = newWidth >= DURATION_THRESHOLDS.medium ? 'medium' : 'short';
         setSections(prev => prev.map(s => {
             if (s.id !== sectionId) return s;
             const { base, duration } = fromApiType(s.type);
@@ -1212,189 +810,55 @@ var App = () => {
                             </button>
                         </Card>
 
-                        {/* AI */}
-                        <Card>
-                            <CardTitle>AI (Style + Lyrics)</CardTitle>
-                            <div style={{ fontSize: '11px', color: '#666', marginBottom: '12px' }}>
-                                One prompt, one button. Generates arrangement, style, and full lyrics.
-                            </div>
-                            <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
-                                <select
-                                    className="custom-select input-base"
-                                    value={lyricsProvider}
-                                    onChange={e => setLyricsProvider(e.target.value)}
-                                    style={{ paddingRight: '28px', cursor: 'pointer' }}
-                                >
-                                    <option value="lmstudio">LM Studio</option>
-                                    <option value="ollama">Ollama</option>
-                                </select>
-                            </div>
-                            <div style={{ marginBottom: '12px' }}>
-                                <div style={{ fontSize: '12px', color: '#666', marginBottom: '6px' }}>Base URL</div>
-                                <input
-                                    type="text"
-                                    className="input-base input-small"
-                                    value={lyricsBaseUrl}
-                                    onChange={e => setLyricsBaseUrl(e.target.value)}
-                                    placeholder="http://localhost:1234/v1"
-                                />
-                            </div>
-                            <div style={{ marginBottom: '12px' }}>
-                                <div style={{ fontSize: '12px', color: '#666', marginBottom: '6px' }}>Model</div>
-                                <div style={{ display: 'flex', gap: '8px' }}>
-                                    {lyricsModels.length > 0 ? (
-                                        <select
-                                            className="custom-select input-base input-small"
-                                            value={lyricsModel}
-                                            onChange={e => setLyricsModel(e.target.value)}
-                                            style={{ paddingRight: '28px', cursor: 'pointer' }}
-                                        >
-                                            {lyricsModels.map(m => <option key={m} value={m}>{m}</option>)}
-                                        </select>
-                                    ) : (
-                                        <input
-                                            type="text"
-                                            className="input-base input-small"
-                                            value={lyricsModel}
-                                            onChange={e => setLyricsModel(e.target.value)}
-                                            placeholder={lyricsProvider === 'ollama' ? 'llama3.1:8b' : 'your-model-name'}
-                                        />
-                                    )}
-                                    <button
-                                        onClick={refreshLyricsModels}
-                                        disabled={lyricsModelsLoading}
-                                        style={{ padding: '8px 10px', fontSize: '11px', backgroundColor: '#2a2a2a', color: '#bbb', border: '1px solid #3a3a3a', borderRadius: '8px', cursor: lyricsModelsLoading ? 'not-allowed' : 'pointer', opacity: lyricsModelsLoading ? 0.6 : 1 }}
-                                    >
-                                        {lyricsModelsLoading ? 'Loading...' : 'Refresh'}
-                                    </button>
-                                </div>
-                                {lyricsModelsError && <div style={{ color: '#EF4444', fontSize: '11px', marginTop: '6px' }}>{lyricsModelsError}</div>}
-                            </div>
-                            <div style={{ marginBottom: '12px' }}>
-                                <div style={{ fontSize: '12px', color: '#666', marginBottom: '6px' }}>Language</div>
-                                <input
-                                    type="text"
-                                    className="input-base input-small"
-                                    value={lyricsLanguage}
-                                    onChange={e => setLyricsLanguage(e.target.value)}
-                                    placeholder="English"
-                                />
-                            </div>
-                            <div style={{ marginBottom: '12px' }}>
-                                <div style={{ fontSize: '12px', color: '#666', marginBottom: '6px' }}>Length</div>
-                                <div style={{ display: 'flex', gap: '8px' }}>
-                                    {['short', 'medium', 'full'].map(len => (
-                                        <button
-                                            key={len}
-                                            onClick={() => setLyricsLength(len)}
-                                            style={{
-                                                flex: 1,
-                                                padding: '8px',
-                                                fontSize: '11px',
-                                                borderRadius: '8px',
-                                                border: '1px solid #3a3a3a',
-                                                backgroundColor: lyricsLength === len ? '#10B98115' : '#1e1e1e',
-                                                color: lyricsLength === len ? '#10B981' : '#777',
-                                                cursor: 'pointer',
-                                                fontWeight: '500',
-                                            }}
-                                        >
-                                            {len.charAt(0).toUpperCase() + len.slice(1)}
-                                        </button>
-                                    ))}
-                                </div>
-                            </div>
-                            <div style={{ marginBottom: '12px' }}>
-                                <div style={{ fontSize: '12px', color: '#666', marginBottom: '6px' }}>Prompt</div>
-                                <textarea
-                                    className="input-base"
-                                    value={lyricsPrompt}
-                                    onChange={e => setLyricsPrompt(e.target.value)}
-                                    placeholder="Keywords and instructions (style + lyrics)..."
-                                    rows={4}
-                                    style={{ resize: 'vertical' }}
-                                />
-                            </div>
-                            <button
-                                onClick={runAutoCreate}
-                                disabled={autoCreateBusy || !lyricsModel}
-                                style={{ width: '100%', padding: '10px', fontSize: '12px', backgroundColor: '#10B981', color: '#fff', border: 'none', borderRadius: '8px', cursor: autoCreateBusy || !lyricsModel ? 'not-allowed' : 'pointer', opacity: autoCreateBusy || !lyricsModel ? 0.6 : 1 }}
-                            >
-                                {autoCreateBusy ? 'Auto Creating...' : 'AI Create (Style + Lyrics)'}
-                            </button>
-                            {styleError && <div style={{ color: '#EF4444', fontSize: '11px', marginTop: '8px' }}>{styleError}</div>}
-                            {lyricsError && <div style={{ color: '#EF4444', fontSize: '11px', marginTop: '6px' }}>{lyricsError}</div>}
-                        </Card>
-
                         {/* Song Settings */}
                         <Card>
                                 <CardTitle>Song Settings</CardTitle>
-                                <div style={{ marginBottom: '16px' }}>
-                                    <div style={{ fontSize: '12px', color: '#666', marginBottom: '8px' }}>Voice</div>
-                                    <div style={{ display: 'flex', gap: '8px' }}>
-                                        {['female', 'male'].map(g => <button key={g} onClick={() => setGender(g)} style={btnStyle(gender === g, '#3B82F6')}>{g.charAt(0).toUpperCase() + g.slice(1)}</button>)}
-                                    </div>
-                                </div>
-                                <div style={{ marginBottom: '16px' }}><div style={{ fontSize: '12px', color: '#666', marginBottom: '8px' }}>Genre</div><MultiSelectWithScroll suggestions={GENRE_SUGGESTIONS} selected={genres} onChange={setGenres} placeholder="Select genre..." /></div>
-                                <div style={{ marginBottom: '16px' }}><div style={{ fontSize: '12px', color: '#666', marginBottom: '8px' }}>Mood</div><MultiSelectWithScroll suggestions={MOOD_SUGGESTIONS} selected={moods} onChange={setMoods} placeholder="Select mood..." /></div>
-                                <div style={{ marginBottom: '16px' }}><div style={{ fontSize: '12px', color: '#666', marginBottom: '8px' }}>Timbre</div><MultiSelectWithScroll suggestions={TIMBRE_SUGGESTIONS} selected={timbres} onChange={setTimbres} placeholder="Select timbre..." /></div>
-                                <div style={{ marginBottom: '16px' }}><div style={{ fontSize: '12px', color: '#666', marginBottom: '8px' }}>Instruments</div><MultiSelectWithScroll suggestions={INSTRUMENT_SUGGESTIONS} selected={instruments} onChange={setInstruments} placeholder="Select instruments..." /></div>
-                                <div style={{ marginBottom: '16px' }}>
-                                    <div style={{ fontSize: '12px', color: '#666', marginBottom: '8px' }}>Custom Style</div>
-                                    <input type="text" value={customStyle} onChange={e => setCustomStyle(e.target.value)} placeholder="e.g. dubstep wobble..." className="input-base" />
-                                </div>
                                 <div>
-                                    <div style={{ fontSize: '12px', color: '#666', marginBottom: '8px', display: 'flex', justifyContent: 'space-between' }}><span>BPM</span><span style={{ color: '#10B981', fontWeight: '500' }}>{bpm}</span></div>
-                                    <input type="range" min="60" max="180" value={bpm} onChange={e => setBpm(+e.target.value)} />
-                                </div>
-                            </Card>
-
-                            {/* Arrangement */}
-                            <Card>
-                                <CardTitle>Arrangement</CardTitle>
-                                <div style={{ marginBottom: '12px' }}>
-                                    <div style={{ fontSize: '12px', color: '#666', marginBottom: '6px' }}>Template</div>
-                                    <select
-                                        className="custom-select input-base"
-                                        value={arrangementTemplate}
-                                        onChange={e => setArrangementTemplate(e.target.value)}
-                                        style={{ paddingRight: '28px', cursor: 'pointer', width: '100%' }}
-                                    >
-                                        {ARRANGEMENT_TEMPLATES.map(t => (
-                                            <option key={t.id} value={t.id}>{t.name}</option>
-                                        ))}
-                                    </select>
-                                    <div style={{ fontSize: '11px', color: '#666', marginTop: '6px' }}>
-                                        {(resolveTemplate(arrangementTemplate, genres) || {}).description || 'Applies a hit-ready structure.'}
+                                    <div style={{ marginBottom: '16px' }}>
+                                        <div style={{ fontSize: '12px', color: '#666', marginBottom: '8px' }}>Voice</div>
+                                        <div style={{ display: 'flex', gap: '8px' }}>
+                                            {['female', 'male'].map(g => <button key={g} onClick={() => setGender(g)} style={btnStyle(gender === g, '#3B82F6')}>{g.charAt(0).toUpperCase() + g.slice(1)}</button>)}
+                                        </div>
+                                    </div>
+                                    <div style={{ marginBottom: '16px' }}>
+                                        <div style={{ fontSize: '12px', color: '#666', marginBottom: '8px' }}>Genre</div>
+                                        <MultiSelectWithScroll suggestions={GENRE_SUGGESTIONS} selected={genres} onChange={(next) => setGenres(next.slice(-1))} placeholder="Select genre..." />
+                                        <div style={{ fontSize: '10px', color: '#555', marginTop: '6px' }}>Pick one recommended tag for best alignment.</div>
+                                    </div>
+                                    <div style={{ marginBottom: '16px' }}><div style={{ fontSize: '12px', color: '#666', marginBottom: '8px' }}>Mood</div><MultiSelectWithScroll suggestions={MOOD_SUGGESTIONS} selected={moods} onChange={setMoods} placeholder="Select mood..." /></div>
+                                    <div style={{ marginBottom: '16px' }}><div style={{ fontSize: '12px', color: '#666', marginBottom: '8px' }}>Timbre</div><MultiSelectWithScroll suggestions={TIMBRE_SUGGESTIONS} selected={timbres} onChange={setTimbres} placeholder="Select timbre..." /></div>
+                                    <div style={{ marginBottom: '16px' }}>
+                                        <div style={{ fontSize: '12px', color: '#666', marginBottom: '8px' }}>Instruments</div>
+                                        <MultiSelectWithScroll suggestions={INSTRUMENT_SUGGESTIONS} selected={instruments} onChange={(next) => setInstruments(next.slice(-1))} placeholder="Select instruments..." />
+                                        <div style={{ fontSize: '10px', color: '#555', marginTop: '6px' }}>Choose one instrument preset; add extras in Custom Style.</div>
+                                    </div>
+                                    <div style={{ marginBottom: '16px' }}>
+                                        <div style={{ fontSize: '12px', color: '#666', marginBottom: '8px' }}>Custom Style</div>
+                                        <input type="text" value={customStyle} onChange={e => setCustomStyle(e.target.value)} placeholder="e.g. dubstep wobble..." className="input-base" />
+                                    </div>
+                                    <div>
+                                        <div style={{ fontSize: '12px', color: '#666', marginBottom: '8px', display: 'flex', justifyContent: 'space-between' }}><span>BPM</span><span style={{ color: '#10B981', fontWeight: '500' }}>{bpm}</span></div>
+                                        <input type="range" min="60" max="180" value={bpm} onChange={e => setBpm(+e.target.value)} />
                                     </div>
                                 </div>
-                                <div style={{ display: 'flex', gap: '8px', marginBottom: '10px' }}>
-                                    <button
-                                        onClick={() => applyArrangementTemplate(arrangementTemplate)}
-                                        style={{ flex: 1, padding: '10px', fontSize: '12px', backgroundColor: '#2a2a2a', color: '#fff', border: '1px solid #3a3a3a', borderRadius: '8px', cursor: 'pointer' }}
-                                    >
-                                        Apply Template
-                                    </button>
-                                    <button
-                                        onClick={() => applyArrangementTemplate('auto')}
-                                        style={{ flex: 1, padding: '10px', fontSize: '12px', backgroundColor: '#10B981', color: '#fff', border: 'none', borderRadius: '8px', cursor: 'pointer' }}
-                                    >
-                                        Auto Arrange
-                                    </button>
-                                </div>
-                                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: '#777', cursor: 'pointer' }}>
-                                    <input
-                                        type="checkbox"
-                                        checked={autoArrange}
-                                        onChange={e => setAutoArrange(e.target.checked)}
-                                        style={{ width: '14px', height: '14px' }}
-                                    />
-                                    Auto apply when genre changes (no lyrics yet)
-                                </label>
                             </Card>
 
                             {/* Reference Audio */}
-                            <Card><CardTitle>Reference Audio</CardTitle><AudioTrimmer onAccept={(d) => { setRefId(d.id); setRefFile({ name: d.fileName }); setUseReference(true); }} onClear={() => { setRefId(null); setRefFile(null); setUseReference(false); setRefFileLoaded(false); }} onFileLoad={setRefFileLoaded} /></Card>
+                            <Card>
+                                <CardTitle>Reference Audio (Optional)</CardTitle>
+                                <AudioTrimmer
+                                    onAccept={(d) => { setRefId(d.id); }}
+                                    onClear={() => { setRefId(null); }}
+                                />
+                                <div style={{ fontSize: '10px', color: '#555' }}>
+                                    The model accepts lyrics + optional text descriptions + optional audio prompts. Only the first 10 seconds are used.
+                                </div>
+                                {hasReference && (
+                                    <div style={{ fontSize: '10px', color: '#C0841A', marginTop: '6px' }}>
+                                        Reference audio can be combined with tags, but conflicting prompts may reduce alignment.
+                                    </div>
+                                )}
+                            </Card>
 
                             {/* Output */}
                             <Card>
@@ -1406,93 +870,6 @@ var App = () => {
                                         </button>
                                     ))}
                                 </div>
-                            </Card>
-
-                            {/* Advanced Settings */}
-                            <Card>
-                                <div onClick={() => setShowAdvanced(!showAdvanced)} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', marginBottom: showAdvanced ? '14px' : '0' }}>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                        <span style={{ fontSize: '13px', fontWeight: '500', color: '#888' }}>Advanced Settings</span>
-                                        {showAdvanced && <button onClick={(e) => { e.stopPropagation(); setCfgCoef(ADVANCED_DEFAULTS.cfgCoef); setTemperature(ADVANCED_DEFAULTS.temperature); setTopK(ADVANCED_DEFAULTS.topK); setTopP(ADVANCED_DEFAULTS.topP); setExtendStride(ADVANCED_DEFAULTS.extendStride); setUseGenrePresets(ADVANCED_DEFAULTS.useGenrePresets); setNumCandidates(ADVANCED_DEFAULTS.numCandidates); setAutoSelectBest(ADVANCED_DEFAULTS.autoSelectBest); }} style={{ fontSize: '10px', color: '#6366F1', background: 'none', border: '1px solid #6366F1', borderRadius: '4px', padding: '2px 6px', cursor: 'pointer' }}>Reset</button>}
-                                    </div>
-                                    <ChevronIcon size={16} color="#666" rotated={showAdvanced} />
-                                </div>
-                                {showAdvanced && (
-                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                                        <div>
-                                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-                                                <span style={{ fontSize: '12px', color: '#888' }}>Style Strength</span>
-                                                <span style={{ fontSize: '12px', color: '#10B981', fontWeight: '500' }}>{cfgCoef}</span>
-                                            </div>
-                                            <input type="range" min="0" max="5" step="0.1" value={cfgCoef} onChange={e => setCfgCoef(parseFloat(e.target.value))} style={{ width: '100%' }} />
-                                            <div style={{ fontSize: '10px', color: '#555', marginTop: '2px' }}>Higher = follows your style more strictly</div>
-                                        </div>
-                                        <div>
-                                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-                                                <span style={{ fontSize: '12px', color: '#888' }}>Creativity</span>
-                                                <span style={{ fontSize: '12px', color: '#10B981', fontWeight: '500' }}>{temperature}</span>
-                                            </div>
-                                            <input type="range" min="0" max="2" step="0.1" value={temperature} onChange={e => setTemperature(parseFloat(e.target.value))} style={{ width: '100%' }} />
-                                            <div style={{ fontSize: '10px', color: '#555', marginTop: '2px' }}>Higher = more experimental</div>
-                                        </div>
-                                        <div>
-                                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-                                                <span style={{ fontSize: '12px', color: '#888' }}>Variety</span>
-                                                <span style={{ fontSize: '12px', color: '#10B981', fontWeight: '500' }}>{topK}</span>
-                                            </div>
-                                            <input type="range" min="1" max="100" step="1" value={topK} onChange={e => setTopK(parseInt(e.target.value))} style={{ width: '100%' }} />
-                                            <div style={{ fontSize: '10px', color: '#555', marginTop: '2px' }}>Musical choices per step</div>
-                                        </div>
-                                        <div>
-                                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-                                                <span style={{ fontSize: '12px', color: '#888' }}>Focus (Top-P)</span>
-                                                <span style={{ fontSize: '12px', color: '#10B981', fontWeight: '500' }}>{topP}</span>
-                                            </div>
-                                            <input type="range" min="0" max="1" step="0.1" value={topP} onChange={e => setTopP(parseFloat(e.target.value))} style={{ width: '100%' }} />
-                                            <div style={{ fontSize: '10px', color: '#555', marginTop: '2px' }}>0=off, else limits choices by probability</div>
-                                        </div>
-                                        <div>
-                                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-                                                <span style={{ fontSize: '12px', color: '#888' }}>Extend Stride</span>
-                                                <span style={{ fontSize: '12px', color: '#10B981', fontWeight: '500' }}>{extendStride}</span>
-                                            </div>
-                                            <input type="range" min="1" max="10" step="1" value={extendStride} onChange={e => setExtendStride(parseInt(e.target.value))} style={{ width: '100%' }} />
-                                            <div style={{ fontSize: '10px', color: '#555', marginTop: '2px' }}>Overlap for longer songs (helps transitions)</div>
-                                        </div>
-                                        <div style={{ borderTop: '1px solid #333', paddingTop: '10px' }}>
-                                            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: '#777', cursor: 'pointer' }}>
-                                                <input
-                                                    type="checkbox"
-                                                    checked={useGenrePresets}
-                                                    onChange={e => setUseGenrePresets(e.target.checked)}
-                                                    style={{ width: '14px', height: '14px' }}
-                                                />
-                                                Use genre presets (auto tuning)
-                                            </label>
-                                            <div style={{ fontSize: '10px', color: '#555', marginTop: '4px' }}>Applies genre-specific parameters before generation.</div>
-                                        </div>
-                                        <div>
-                                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-                                                <span style={{ fontSize: '12px', color: '#888' }}>Variations</span>
-                                                <span style={{ fontSize: '12px', color: '#10B981', fontWeight: '500' }}>{numCandidates}</span>
-                                            </div>
-                                            <input type="range" min="1" max="5" step="1" value={numCandidates} onChange={e => setNumCandidates(parseInt(e.target.value))} style={{ width: '100%' }} />
-                                            <div style={{ fontSize: '10px', color: '#555', marginTop: '2px' }}>Generate multiple takes and pick the best.</div>
-                                        </div>
-                                        <div>
-                                            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: '#777', cursor: 'pointer' }}>
-                                                <input
-                                                    type="checkbox"
-                                                    checked={autoSelectBest}
-                                                    onChange={e => setAutoSelectBest(e.target.checked)}
-                                                    style={{ width: '14px', height: '14px' }}
-                                                />
-                                                Auto select best take
-                                            </label>
-                                            <div style={{ fontSize: '10px', color: '#555', marginTop: '4px' }}>Scores candidates by audio quality + BPM match.</div>
-                                        </div>
-                                    </div>
-                                )}
                             </Card>
 
                             {/* Song Title */}
@@ -1527,7 +904,7 @@ var App = () => {
                                                     <span style={{ display: 'flex', alignItems: 'center', gap: '3px', userSelect: 'none' }}>
                                                         <DragIcon size={8} color={cfg.color} style={{ opacity: 0.4 }} />
                                                         {cfg.name}
-                                                        {isResizable && <span style={{ fontSize: '8px', opacity: 0.7 }}>{duration === 'long' ? 'L' : duration === 'medium' ? 'M' : 'S'}</span>}
+                                                        {isResizable && <span style={{ fontSize: '8px', opacity: 0.7 }}>{duration === 'medium' ? 'M' : 'S'}</span>}
                                                     </span>
                                                     {isResizable && (
                                                         <div onMouseDown={(e) => handleResizeStart(e, s.id, currentWidth)} draggable={false} style={{ position: 'absolute', right: '-2px', top: '2px', bottom: '2px', width: '6px', cursor: 'ew-resize', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '2px', backgroundColor: resizingId === s.id ? cfg.color + '80' : cfg.color + '50', transition: resizingId === s.id ? 'none' : 'background-color 0.15s' }} title="Drag to resize" />
@@ -1539,6 +916,9 @@ var App = () => {
                                     })}
                                     <div style={{ width: '4px', flexShrink: 0 }} />
                                     <button ref={addBtnRef} onClick={toggleAddMenu} style={{ width: '22px', height: '22px', borderRadius: '5px', backgroundColor: '#1e1e1e', border: '1px dashed #3a3a3a', color: '#666', fontSize: '14px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, transition: 'all 0.15s' }} onMouseEnter={e => { e.currentTarget.style.borderColor = '#10B981'; e.currentTarget.style.color = '#10B981'; }} onMouseLeave={e => { e.currentTarget.style.borderColor = '#3a3a3a'; e.currentTarget.style.color = '#666'; }}>+</button>
+                                </div>
+                                <div style={{ marginTop: '8px', fontSize: '11px', color: '#666' }}>
+                                    Use Verse/Chorus/Bridge for lyrics. Intro/Outro/Instrumental are instrumental only. Each line becomes a sentence. Instrumental (inst) is less stable.
                                 </div>
                             </Card>
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
@@ -1626,7 +1006,6 @@ var App = () => {
                                         onDelete={() => deleteGeneration(item.id).then(loadLibrary)}
                                         onPlay={audioPlayer.play}
                                         onUpdate={loadLibrary}
-                                        onRemix={handleRemix}
                                         isCurrentlyPlaying={audioPlayer.playingId === item.id}
                                         isAudioPlaying={audioPlayer.isPlaying}
                                         playingTrackIdx={audioPlayer.playingTrackIdx}

@@ -30,16 +30,7 @@ from schemas import (
     Section,
     SongRequest,
     UpdateGenerationRequest,
-    LyricsRequest,
-    LyricsModelsRequest,
-    StyleRequest,
-    StructureRequest,
-    RemixRequest,
 )
-from lyrics_llm import generate_lyrics, list_models as list_lyric_models
-from style_llm import generate_style
-from structure_llm import generate_structure
-from remix_llm import generate_remix
 from timing import get_timing_stats
 from models import (
     MODEL_REGISTRY, get_model_status, get_model_status_quick,
@@ -170,12 +161,6 @@ async def process_queue_item():
                 model=item.get('model', DEFAULT_MODEL),
                 output_mode=item.get('output_mode', 'mixed'),
                 reference_audio_id=item.get('reference_audio_id'),
-                # Advanced generation parameters
-                cfg_coef=item.get('cfg_coef', 1.5),
-                temperature=item.get('temperature', 0.8),
-                top_k=item.get('top_k', 50),
-                top_p=item.get('top_p', 0.0),
-                extend_stride=item.get('extend_stride', 5),
             )
         except Exception as e:
             print(f"[QUEUE-PROC] Error creating request: {e}")
@@ -278,46 +263,6 @@ async def get_gpu_status():
 @app.get("/api/timing-stats")
 async def get_timing_statistics():
     return get_timing_stats()
-
-
-@app.post("/api/lyrics")
-async def generate_lyrics_route(request: LyricsRequest):
-    try:
-        return await asyncio.to_thread(generate_lyrics, request)
-    except Exception as exc:
-        raise HTTPException(500, f"Lyric generation failed: {exc}")
-
-
-@app.post("/api/lyrics/models")
-async def list_lyrics_models_route(request: LyricsModelsRequest):
-    try:
-        return await asyncio.to_thread(list_lyric_models, request)
-    except Exception as exc:
-        raise HTTPException(500, f"Model list failed: {exc}")
-
-
-@app.post("/api/style")
-async def generate_style_route(request: StyleRequest):
-    try:
-        return await asyncio.to_thread(generate_style, request)
-    except Exception as exc:
-        raise HTTPException(500, f"Style generation failed: {exc}")
-
-
-@app.post("/api/structure")
-async def generate_structure_route(request: StructureRequest):
-    try:
-        return await asyncio.to_thread(generate_structure, request)
-    except Exception as exc:
-        raise HTTPException(500, f"Structure generation failed: {exc}")
-
-
-@app.post("/api/remix")
-async def generate_remix_route(request: RemixRequest):
-    try:
-        return await asyncio.to_thread(generate_remix, request)
-    except Exception as exc:
-        raise HTTPException(500, f"Remix generation failed: {exc}")
 
 
 # Simple SSE test endpoint

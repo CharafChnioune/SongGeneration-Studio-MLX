@@ -100,7 +100,16 @@ var useModels = () => {
             if (!r.ok) throw new Error(`Failed to load models: ${r.status}`);
             const d = await r.json();
             
-            const all = d.models || [];
+            const all = (d.models || []).map(m => {
+                if (m.status !== 'downloading') return m;
+                const total = Number(m.download_total_gb || m.total_gb || m.size_gb || 0);
+                const downloaded = Number(m.downloaded_gb || 0);
+                const derived = total > 0 ? Math.min(100, Math.floor((downloaded / total) * 100)) : 0;
+                if (!m.progress || m.progress < derived) {
+                    return { ...m, progress: derived };
+                }
+                return m;
+            });
             const ready = d.ready_models || all.filter(m => m.status === 'ready');
 
             setAllModels(all);

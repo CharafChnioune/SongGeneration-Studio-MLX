@@ -1,15 +1,13 @@
 # SongGeneration Studio MLX
 
-PyTorch-free SongGeneration for Apple Silicon, powered by MLX. Includes a full web UI, lyrics/style AI, and MLX-only inference.
+PyTorch-free SongGeneration for Apple Silicon, powered by MLX. Includes a full web UI and MLX-only inference.
 
 ## Highlights
 
 - 100% MLX inference (no PyTorch).
 - Web UI for full songs, vocals, instrumentals, or separated stems.
-- Built-in AI for style + lyrics (LM Studio or Ollama).
+- Lyrics + optional text descriptions + optional reference audio (paper-aligned).
 - Optional prompt-audio conditioning with ONNX/CoreML separator.
-- Multi-candidate generation + auto-select best take.
-- Auto-arrangement templates + genre presets.
 
 ## Requirements
 
@@ -31,7 +29,7 @@ pip install -r requirements_mlx.txt
 python tools/fetch_runtime.py --local-dir .
 ```
 
-This downloads `ckpt/` and `third_party/` from the runtime assets repo.
+This downloads `ckpt/` and `third_party/` from the runtime assets repo. The Model Manager will also pull runtime assets automatically when you download a model.
 
 ## MLX model weights (download when selected)
 
@@ -77,6 +75,7 @@ Outputs `.flac` + `.wav` in `output/cli/audios/`.
 ## Lyrics format notes
 
 - `[intro-short]`, `[intro-medium]`, `[inst-short]`, `[inst-medium]`, `[outro-short]`, `[outro-medium]` are instrumental (lyrics are ignored).
+- `[inst-*]` is supported but less stable than intro/outro tags.
 - If a `-long` tag is used, it is normalized to `-medium` for compatibility.
 
 ## Prompt audio (optional)
@@ -86,10 +85,7 @@ Outputs `.flac` + `.wav` in `output/cli/audios/`.
   - `third_party/demucs/ckpt/htdemucs.onnx` or
   - `third_party/demucs/ckpt/htdemucs.mlpackage`
 - You can override backend/model via `generate_mlx.py --separator_backend` and `--separator_model`.
-
-## Lyrics + Style AI (LM Studio / Ollama)
-
-In the UI, set the provider, base URL, and model, then use **AI Create (Style + Lyrics)** to generate both in one step.
+- You can combine reference audio with text tags, but avoid conflicting prompts for best alignment.
 
 ## Output & logs
 

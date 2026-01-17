@@ -9,9 +9,8 @@ var SECTION_TYPES = {
     'verse': { name: 'Verse', color: '#3B82F6', hasLyrics: true, hasDuration: false },
     'chorus': { name: 'Chorus', color: '#F59E0B', hasLyrics: true, hasDuration: false },
     'bridge': { name: 'Bridge', color: '#EC4899', hasLyrics: true, hasDuration: false },
-    'inst': { name: 'Inst', color: '#10B981', hasLyrics: false, hasDuration: true },
+    'inst': { name: 'Instrumental', color: '#10B981', hasLyrics: false, hasDuration: true },
     'outro': { name: 'Outro', color: '#EAB308', hasLyrics: false, hasDuration: true },
-    'prechorus': { name: 'Pre-Chorus', color: '#06B6D4', hasLyrics: true, hasDuration: false },
 };
 
 // Model generation time defaults (in seconds) - used as starting point before learning
@@ -39,120 +38,98 @@ var DEFAULT_SECTIONS = [
     { id: '5', type: 'outro-short', lyrics: '' },
 ];
 
-// Arrangement templates for auto-structuring songs
-var ARRANGEMENT_TEMPLATES = [
-    {
-        id: 'auto',
-        name: 'Auto (by genre)',
-        description: 'Matches your selected genre.',
-        sections: [],
-    },
-    {
-        id: 'pop_hit',
-        name: 'Pop Hit',
-        description: 'Hook-forward radio structure.',
-        sections: ['intro-short', 'verse', 'prechorus', 'chorus', 'verse', 'prechorus', 'chorus', 'bridge', 'chorus', 'outro-short'],
-    },
-    {
-        id: 'hiphop_story',
-        name: 'Hip-Hop Story',
-        description: 'Verse-driven with a strong hook.',
-        sections: ['intro-short', 'verse', 'chorus', 'verse', 'chorus', 'verse', 'outro-short'],
-    },
-    {
-        id: 'trap_bounce',
-        name: 'Trap Bounce',
-        description: 'Shorter verses, punchy hooks.',
-        sections: ['intro-short', 'verse', 'chorus', 'verse', 'chorus', 'outro-short'],
-    },
-    {
-        id: 'rnb_smooth',
-        name: 'R&B Smooth',
-        description: 'Melodic verses with a bridge lift.',
-        sections: ['intro-short', 'verse', 'chorus', 'verse', 'chorus', 'bridge', 'chorus', 'outro-short'],
-    },
-    {
-        id: 'rock_anthem',
-        name: 'Rock Anthem',
-        description: 'Big chorus, extended outro.',
-        sections: ['intro-short', 'verse', 'chorus', 'verse', 'chorus', 'bridge', 'chorus', 'outro-medium'],
-    },
-    {
-        id: 'edm_build',
-        name: 'EDM Build',
-        description: 'Build + drop + outro.',
-        sections: ['intro-medium', 'verse', 'prechorus', 'chorus', 'verse', 'chorus', 'bridge', 'chorus', 'outro-medium'],
-    },
-];
-
-var GENRE_TO_TEMPLATE = {
-    'hiphop': 'hiphop_story',
-    'hip-hop': 'hiphop_story',
-    'hip hop': 'hiphop_story',
-    'rap': 'hiphop_story',
-    'trap': 'trap_bounce',
-    'pop': 'pop_hit',
-    'rock': 'rock_anthem',
-    'metal': 'rock_anthem',
-    'r&b': 'rnb_smooth',
-    'rnb': 'rnb_smooth',
-    'edm': 'edm_build',
-    'dance': 'edm_build',
-    'electronic': 'edm_build',
-};
-
 // Duration widths for resizable sections
-var DURATION_WIDTHS = { short: 52, medium: 66, long: 80 };
-
-// High quality defaults for advanced generation
-var ADVANCED_DEFAULTS = {
-    cfgCoef: 2.2,
-    temperature: 0.7,
-    topK: 60,
-    topP: 0.9,
-    extendStride: 6,
-    numCandidates: 2,
-    autoSelectBest: true,
-    useGenrePresets: true,
-};
+var DURATION_WIDTHS = { short: 68, medium: 92 };
 
 // Suggestion lists
 var GENRE_SUGGESTIONS = [
-    'Pop', 'Pop Rock', 'Indie Pop', 'Synth Pop', 'K-Pop', 'J-Pop', 'Latin Pop',
-    'Rock', 'Alternative Rock', 'Indie Rock', 'Hard Rock', 'Punk', 'Pop Punk', 'Post-Punk',
-    'Metal', 'Metalcore', 'Death Metal', 'Black Metal',
-    'Hip-Hop', 'Rap', 'Trap', 'Drill', 'Boom Bap', 'G-Funk', 'Grime', 'Jersey Club', 'Phonk', 'Lo-Fi', 'Chillhop',
-    'R&B', 'Neo Soul', 'Soul', 'Funk',
-    'Electronic', 'EDM', 'House', 'Deep House', 'Tech House', 'Progressive House', 'Electro House',
-    'Techno', 'Trance', 'Dubstep', 'Drum & Bass', 'Breakbeat', 'Garage', 'UK Garage', 'IDM', 'Glitch',
-    'Ambient', 'Downtempo', 'Trip-Hop', 'Synthwave', 'Vaporwave', 'Future Bass',
-    'Disco', 'Reggae', 'Dancehall', 'Reggaeton', 'Afrobeat', 'Amapiano', 'Salsa', 'Bossa Nova', 'Cumbia',
-    'Country', 'Americana', 'Bluegrass', 'Folk', 'Singer-Songwriter', 'Acoustic',
-    'Jazz', 'Jazz Fusion', 'Blues', 'Classical', 'Orchestral', 'Cinematic', 'Soundtrack', 'World',
+    'pop',
+    'electronic',
+    'hip hop',
+    'rock',
+    'jazz',
+    'blues',
+    'classical',
+    'rap',
+    'country',
+    'classic rock',
+    'hard rock',
+    'folk',
+    'soul',
+    'dance, electronic',
+    'rockabilly',
+    'dance, dancepop, house, pop',
+    'reggae',
+    'experimental',
+    'dance, pop',
+    'dance, deephouse, electronic',
+    'k-pop',
+    'experimental pop',
+    'pop punk',
+    'rock and roll',
+    'R&B',
+    'varies',
+    'pop rock',
 ];
 var MOOD_SUGGESTIONS = [
-    'Happy', 'Sad', 'Energetic', 'Calm', 'Romantic', 'Melancholic', 'Uplifting', 'Dark', 'Dreamy', 'Aggressive',
-    'Peaceful', 'Nostalgic', 'Hopeful', 'Intense', 'Playful', 'Mysterious', 'Euphoric', 'Chill', 'Powerful', 'Tender',
-    'Gritty', 'Moody', 'Angry', 'Confident', 'Anthemic', 'Cinematic', 'Ethereal', 'Luxurious', 'Raw', 'Spooky',
-    'Lonely', 'Warm', 'Cold', 'Sexy', 'Rebellious', 'Mellow', 'Trippy', 'Hypnotic', 'Minimal', 'Introspective',
-    'Suspenseful', 'Triumphant', 'Carefree', 'Somber', 'Haunting', 'Vulnerable', 'Optimistic', 'Dramatic',
+    'sad',
+    'emotional',
+    'angry',
+    'happy',
+    'uplifting',
+    'intense',
+    'romantic',
+    'melancholic',
 ];
 var TIMBRE_SUGGESTIONS = [
-    'Warm', 'Bright', 'Dark', 'Soft', 'Harsh', 'Smooth', 'Gritty', 'Airy', 'Rich', 'Thin', 'Full', 'Hollow',
-    'Crisp', 'Mellow', 'Punchy', 'Breathy', 'Raspy', 'Nasal', 'Glassy', 'Metallic', 'Woody', 'Velvet',
-    'Silky', 'Grainy', 'Crunchy', 'Thick', 'Dry', 'Wet', 'Sparkly', 'Muted', 'Open', 'Compressed', 'Dynamic', 'Resonant',
+    'dark',
+    'bright',
+    'warm',
+    'rock',
+    'varies',
+    'soft',
+    'vocal',
 ];
 var INSTRUMENT_SUGGESTIONS = [
-    'Piano', 'Electric Piano', 'Rhodes', 'Wurlitzer', 'Organ', 'Accordion', 'Synthesizer', 'Pad', 'Lead Synth', 'Arpeggiator', 'Keys',
-    'Guitar', 'Electric Guitar', 'Acoustic Guitar', 'Bass', 'Electric Bass', 'Sub Bass', 'Synth Bass', '808',
-    'Drums', 'Kick', 'Snare', 'Clap', 'Hi-Hats', 'Toms', 'Cymbals', 'Percussion', 'Shakers', 'Tambourine', 'Drum Machine',
-    'Strings', 'Violin', 'Viola', 'Cello', 'Contrabass', 'Harp',
-    'Brass', 'Trumpet', 'Trombone', 'Horn', 'Saxophone',
-    'Woodwinds', 'Flute', 'Clarinet', 'Oboe', 'Bassoon',
-    'Choir', 'Vocoder', 'Talkbox',
-    'Bell', 'Glockenspiel', 'Marimba', 'Xylophone', 'Vibraphone', 'Steel Drums',
-    'Sitar', 'Banjo', 'Mandolin', 'Ukulele', 'Harmonica', 'Bagpipes', 'Erhu', 'Shamisen',
-    'Sampler', 'Turntables', 'Scratch', 'FX', 'Risers',
+    'synthesizer and piano',
+    'piano and drums',
+    'piano and synthesizer',
+    'synthesizer and drums',
+    'piano and strings',
+    'guitar and drums',
+    'guitar and piano',
+    'piano and double bass',
+    'piano and guitar',
+    'acoustic guitar and piano',
+    'acoustic guitar and synthesizer',
+    'synthesizer and guitar',
+    'piano and saxophone',
+    'saxophone and piano',
+    'piano and violin',
+    'electric guitar and drums',
+    'acoustic guitar and drums',
+    'synthesizer',
+    'guitar and fiddle',
+    'guitar and harmonica',
+    'synthesizer and acoustic guitar',
+    'beats',
+    'piano',
+    'acoustic guitar and fiddle',
+    'brass and piano',
+    'bass and drums',
+    'violin',
+    'acoustic guitar and harmonica',
+    'piano and cello',
+    'saxophone and trumpet',
+    'guitar and banjo',
+    'guitar and synthesizer',
+    'saxophone',
+    'violin and piano',
+    'synthesizer and bass',
+    'synthesizer and electric guitar',
+    'electric guitar and piano',
+    'beats and piano',
+    'guitar',
 ];
 
 // ============ Utility Functions ============
@@ -181,8 +158,11 @@ var formatEta = (seconds) => {
 // Parse section type into base and duration
 var fromApiType = (type) => {
     const parts = type.split('-');
-    if (parts.length === 2 && ['short', 'medium', 'long'].includes(parts[1])) {
+    if (parts.length === 2 && ['short', 'medium'].includes(parts[1])) {
         return { base: parts[0], duration: parts[1] };
+    }
+    if (parts.length === 2 && parts[1] === 'long') {
+        return { base: parts[0], duration: 'medium' };
     }
     return { base: type, duration: null };
 };
