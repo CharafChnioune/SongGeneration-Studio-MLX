@@ -101,3 +101,25 @@ var generateStyle = async (payload) => {
     if (!r.ok) throw new Error(await r.text());
     return r.json();
 };
+
+// ============ Structure AI ============
+var generateStructure = async (payload) => {
+    const r = await fetch('/api/structure', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+    });
+    if (!r.ok) throw new Error(await r.text());
+    return r.json();
+};
+
+// ============ Remix AI ============
+var generateRemix = async (payload) => {
+    const r = await fetch('/api/remix', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+    });
+    if (!r.ok) throw new Error(await r.text());
+    return r.json();
+};

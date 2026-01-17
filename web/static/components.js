@@ -1452,10 +1452,134 @@ var EditModal = ({ item, onClose, onSave }) => {
     );
 };
 
+// Remix modal component
+var RemixModal = ({ item, onClose, onRemix }) => {
+    const [prompt, setPrompt] = useState('');
+    const [keepReference, setKeepReference] = useState(false);
+    const [error, setError] = useState(null);
+    const [busy, setBusy] = useState(false);
+    const meta = item.metadata || {};
+    const hasReference = !!(meta.reference_audio || meta.reference_audio_id);
+
+    const handleRemix = async () => {
+        if (busy) return;
+        const cleaned = (prompt || '').trim();
+        if (!cleaned) {
+            setError('Prompt is required');
+            return;
+        }
+        setBusy(true);
+        setError(null);
+        try {
+            await onRemix(cleaned, keepReference);
+            onClose();
+        } catch (err) {
+            setError(err.message || 'Remix failed');
+        } finally {
+            setBusy(false);
+        }
+    };
+
+    return (
+        <div style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.7)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000,
+        }} onClick={onClose}>
+            <div style={{
+                backgroundColor: '#1a1a1a',
+                borderRadius: '16px',
+                padding: '24px',
+                width: '520px',
+                maxWidth: '90vw',
+                border: '1px solid #333',
+            }} onClick={e => e.stopPropagation()}>
+                <h2 style={{ margin: 0, marginBottom: '16px', fontSize: '18px', color: '#fff' }}>AI Remix</h2>
+                <div style={{ fontSize: '12px', color: '#888', marginBottom: '8px' }}>
+                    Describe how to change this song (lyrics, vibe, energy, structure notes).
+                </div>
+                <textarea
+                    value={prompt}
+                    onChange={(e) => setPrompt(e.target.value)}
+                    className="input-base"
+                    rows={5}
+                    placeholder="e.g. Make it darker, more aggressive hip-hop, faster BPM, stronger hook."
+                    style={{ width: '100%', resize: 'vertical', marginBottom: '12px' }}
+                />
+                {hasReference && (
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: '#777', cursor: 'pointer', marginBottom: '12px' }}>
+                        <input
+                            type="checkbox"
+                            checked={keepReference}
+                            onChange={(e) => setKeepReference(e.target.checked)}
+                            style={{ width: '14px', height: '14px' }}
+                        />
+                        Keep reference audio (style clone)
+                    </label>
+                )}
+                {error && (
+                    <div style={{
+                        backgroundColor: 'rgba(239, 68, 68, 0.15)',
+                        border: '1px solid rgba(239, 68, 68, 0.3)',
+                        borderRadius: '8px',
+                        padding: '10px 12px',
+                        marginBottom: '16px',
+                        color: '#f87171',
+                        fontSize: '13px',
+                    }}>
+                        {error}
+                    </div>
+                )}
+                <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
+                    <button
+                        onClick={onClose}
+                        style={{
+                            padding: '10px 20px',
+                            backgroundColor: '#1e1e1e',
+                            border: '1px solid #3a3a3a',
+                            borderRadius: '8px',
+                            color: '#888',
+                            cursor: 'pointer',
+                            fontSize: '14px',
+                        }}
+                    >
+                        Cancel
+                    </button>
+                    <button
+                        onClick={handleRemix}
+                        disabled={busy}
+                        style={{
+                            padding: '10px 20px',
+                            backgroundColor: '#10B981',
+                            border: 'none',
+                            borderRadius: '8px',
+                            color: '#fff',
+                            cursor: busy ? 'not-allowed' : 'pointer',
+                            fontSize: '14px',
+                            fontWeight: '500',
+                            opacity: busy ? 0.7 : 1,
+                        }}
+                    >
+                        {busy ? 'Remixing...' : 'Generate Remix'}
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+};
+
 // Library item component
-var LibraryItem = ({ item, isQueued, isGenerating, queuePosition, onRemoveFromQueue, onStop, onDelete, onPlay, onUpdate, isCurrentlyPlaying, isAudioPlaying, playingTrackIdx, status, elapsedTime, estimatedTime }) => {
+var LibraryItem = ({ item, isQueued, isGenerating, queuePosition, onRemoveFromQueue, onStop, onDelete, onPlay, onUpdate, onRemix, isCurrentlyPlaying, isAudioPlaying, playingTrackIdx, status, elapsedTime, estimatedTime }) => {
     const [expanded, setExpanded] = useState(false);
     const [editing, setEditing] = useState(false);
+    const [remixing, setRemixing] = useState(false);
     const [exportingMp4, setExportingMp4] = useState(false);
     const [exportError, setExportError] = useState(null);
     const [selectedTrack, setSelectedTrack] = useState(0);
@@ -1656,6 +1780,9 @@ var LibraryItem = ({ item, isQueued, isGenerating, queuePosition, onRemoveFromQu
                     <button className="btn-icon btn-danger" onClick={onStop}>Stop</button>
                 )}
                 {isQueued && <button className="btn-icon btn-danger" onClick={onRemoveFromQueue}>Remove</button>}
+                {!isQueued && !isGenerating && item.status === 'completed' && onRemix && (
+                    <button className="btn-icon btn-success" onClick={() => setRemixing(true)} title="AI Remix">Remix</button>
+                )}
                 {!isQueued && !isGenerating && item.status === 'completed' && (
                     <button className="btn-icon" onClick={() => setEditing(true)} title="Edit"><EditIcon /></button>
                 )}
@@ -1738,6 +1865,17 @@ var LibraryItem = ({ item, isQueued, isGenerating, queuePosition, onRemoveFromQu
                     onSave={() => {
                         // Trigger library reload to get updated metadata
                         onUpdate && onUpdate();
+                    }}
+                />
+            )}
+
+            {remixing && (
+                <RemixModal
+                    item={item}
+                    onClose={() => setRemixing(false)}
+                    onRemix={async (prompt, keepReference) => {
+                        if (!onRemix) throw new Error('Remix handler not available');
+                        await onRemix(item, { prompt, keepReference });
                     }}
                 />
             )}

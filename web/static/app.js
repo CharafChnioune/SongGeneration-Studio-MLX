@@ -16,7 +16,7 @@ var App = () => {
     const [outputMode, setOutputMode] = useState(localStorage.getItem('output_mode') || 'mixed');
     const [arrangementTemplate, setArrangementTemplate] = useState(localStorage.getItem('arrangement_template') || 'auto');
     const [autoArrange, setAutoArrange] = useState(localStorage.getItem('auto_arrange') === 'true');
-    const [numCandidates, setNumCandidates] = useState(parseInt(localStorage.getItem('num_candidates') || '1', 10));
+    const [numCandidates, setNumCandidates] = useState(parseInt(localStorage.getItem('num_candidates') || String(ADVANCED_DEFAULTS.numCandidates), 10));
     const [autoSelectBest, setAutoSelectBest] = useState(localStorage.getItem('auto_select_best') !== 'false');
     const [useGenrePresets, setUseGenrePresets] = useState(localStorage.getItem('use_genre_presets') !== 'false');
 
@@ -40,11 +40,11 @@ var App = () => {
     const [autoCreateBusy, setAutoCreateBusy] = useState(false);
 
     // Advanced settings
-    const [cfgCoef, setCfgCoef] = useState(1.5);
-    const [temperature, setTemperature] = useState(0.8);
-    const [topK, setTopK] = useState(50);
-    const [topP, setTopP] = useState(0.0);
-    const [extendStride, setExtendStride] = useState(5);
+    const [cfgCoef, setCfgCoef] = useState(ADVANCED_DEFAULTS.cfgCoef);
+    const [temperature, setTemperature] = useState(ADVANCED_DEFAULTS.temperature);
+    const [topK, setTopK] = useState(ADVANCED_DEFAULTS.topK);
+    const [topP, setTopP] = useState(ADVANCED_DEFAULTS.topP);
+    const [extendStride, setExtendStride] = useState(ADVANCED_DEFAULTS.extendStride);
     const [showAdvanced, setShowAdvanced] = useState(false);
 
     // Generation state
@@ -659,6 +659,12 @@ var App = () => {
         bpm,
     });
 
+    const splitTagList = (value) => {
+        if (!value) return [];
+        if (Array.isArray(value)) return value.map(v => String(v).trim()).filter(Boolean);
+        return String(value).split(',').map(v => v.trim()).filter(Boolean);
+    };
+
     const normalizeGenreKey = (value) => {
         if (!value) return '';
         const raw = value.toLowerCase().trim();
@@ -687,6 +693,15 @@ var App = () => {
         setSections(newSections);
         setArrangementTemplate(templateId);
         if (!silent) setShowAddMenu(false);
+    };
+
+    const buildSectionList = (sectionTypes) => {
+        if (!Array.isArray(sectionTypes) || sectionTypes.length === 0) return null;
+        return sectionTypes.map((type, idx) => ({
+            id: `${Date.now()}-${idx}`,
+            type,
+            lyrics: '',
+        }));
     };
 
     const collectLyricsText = () => {
@@ -788,18 +803,6 @@ var App = () => {
         setStyleError(null);
         setLyricsError(null);
         try {
-            const template = resolveTemplate(arrangementTemplate, genres);
-            const sectionTemplate = template && template.sections?.length ? template.sections : null;
-            let baseSections = sections;
-            if (sectionTemplate) {
-                baseSections = sectionTemplate.map((type, idx) => ({
-                    id: `${Date.now()}-${idx}`,
-                    type,
-                    lyrics: '',
-                }));
-                setSections(baseSections);
-            }
-
             const stylePayload = {
                 provider: lyricsProvider,
                 base_url: lyricsBaseUrl,
@@ -824,6 +827,42 @@ var App = () => {
             };
             const styleText = buildStyleDescriptionFromValues(mergedStyle);
 
+            const mergedGenres = mergedStyle.genres || genres;
+            const template = resolveTemplate(arrangementTemplate, mergedGenres);
+            const sectionTemplate = template && template.sections?.length ? template.sections : null;
+            let baseSections = sections;
+            let usedStructure = false;
+
+            if (arrangementTemplate === 'auto') {
+                try {
+                    const structurePayload = {
+                        provider: lyricsProvider,
+                        base_url: lyricsBaseUrl,
+                        model: lyricsModel,
+                        seed_words: lyricsPrompt,
+                        title,
+                        language: lyricsLanguage,
+                        target_genre: mergedGenres && mergedGenres.length ? mergedGenres[0] : '',
+                        style: styleText,
+                        length: lyricsLength,
+                    };
+                    const structureResult = await generateStructure(structurePayload);
+                    const aiSections = buildSectionList(structureResult.sections || []);
+                    if (aiSections && aiSections.length) {
+                        baseSections = aiSections;
+                        setSections(baseSections);
+                        usedStructure = true;
+                    }
+                } catch (e) {
+                    console.warn('[AI-STRUCTURE] Failed, falling back to template:', e);
+                }
+            }
+
+            if (!usedStructure && sectionTemplate) {
+                baseSections = buildSectionList(sectionTemplate) || baseSections;
+                setSections(baseSections);
+            }
+
             await runLyricsGeneration('generate', { sections: baseSections, style: styleText });
         } catch (e) {
             const message = e.message || 'Failed to auto create';
@@ -832,6 +871,77 @@ var App = () => {
             setStyleBusy(false);
             setLyricsBusy(false);
             setAutoCreateBusy(false);
+        }
+    };
+
+    const handleRemix = async (item, options) => {
+        if (!lyricsModel) throw new Error('Model is required');
+        if (!modelState.hasReadyModel || modelState.models.length === 0) {
+            throw new Error('No models downloaded. Please download a model first.');
+        }
+        const meta = item.metadata || {};
+        const sourceSections = meta.sections || item.sections || [];
+        if (!Array.isArray(sourceSections) || sourceSections.length === 0) {
+            throw new Error('No sections available to remix');
+        }
+        const remixSections = sourceSections.map(s => {
+            const type = s.type || 'verse';
+            const { base } = fromApiType(type);
+            const cfg = SECTION_TYPES[base] || { hasLyrics: true };
+            return { type, has_lyrics: cfg.hasLyrics, lyrics: s.lyrics || '' };
+        });
+        const remixPayload = {
+            provider: lyricsProvider,
+            base_url: lyricsBaseUrl,
+            model: lyricsModel,
+            song_model: meta.model || modelState.selectedModel || 'songgeneration_base',
+            prompt: options.prompt,
+            title: meta.title || item.title || 'Untitled',
+            language: lyricsLanguage,
+            sections: remixSections,
+            genre: meta.genre || '',
+            moods: splitTagList(meta.emotion),
+            timbres: splitTagList(meta.timbre),
+            instruments: splitTagList(meta.instruments),
+            bpm: meta.bpm || bpm,
+            gender: meta.gender || gender,
+            custom_style: meta.custom_style || customStyle,
+            output_mode: meta.output_mode || item.output_mode || outputMode,
+            reference_audio_id: options.keepReference ? (meta.reference_audio_id || null) : null,
+            arrangement_template: meta.arrangement_template || arrangementTemplate,
+            advanced: {
+                cfg_coef: meta.cfg_coef ?? cfgCoef,
+                temperature: meta.temperature ?? temperature,
+                top_k: meta.top_k ?? topK,
+                top_p: meta.top_p ?? topP,
+                extend_stride: meta.extend_stride ?? extendStride,
+                use_genre_presets: meta.use_genre_presets ?? useGenrePresets,
+                num_candidates: meta.num_candidates ?? numCandidates,
+                auto_select_best: meta.auto_select_best ?? autoSelectBest,
+            },
+            length: lyricsLength,
+        };
+        const result = await generateRemix(remixPayload);
+        const payload = result.payload;
+        if (!payload) throw new Error('Remix returned no payload');
+
+        let modelToUse = payload.model;
+        if (!modelState.models.some(m => m.id === modelToUse && m.status === 'ready')) {
+            const firstReady = modelState.models.find(m => m.status === 'ready');
+            if (firstReady) {
+                modelToUse = firstReady.id;
+                payload.model = modelToUse;
+            } else {
+                throw new Error('No models ready.');
+            }
+        }
+
+        if (generating) {
+            await addToQueue(payload);
+            await loadQueue();
+        } else {
+            setGenerating(true);
+            doStartGeneration(payload);
         }
     };
 
@@ -1303,7 +1413,7 @@ var App = () => {
                                 <div onClick={() => setShowAdvanced(!showAdvanced)} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', marginBottom: showAdvanced ? '14px' : '0' }}>
                                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                                         <span style={{ fontSize: '13px', fontWeight: '500', color: '#888' }}>Advanced Settings</span>
-                                        {showAdvanced && <button onClick={(e) => { e.stopPropagation(); setCfgCoef(1.5); setTemperature(0.8); setTopK(50); setTopP(0.0); setExtendStride(5); setUseGenrePresets(true); setNumCandidates(1); setAutoSelectBest(true); }} style={{ fontSize: '10px', color: '#6366F1', background: 'none', border: '1px solid #6366F1', borderRadius: '4px', padding: '2px 6px', cursor: 'pointer' }}>Reset</button>}
+                                        {showAdvanced && <button onClick={(e) => { e.stopPropagation(); setCfgCoef(ADVANCED_DEFAULTS.cfgCoef); setTemperature(ADVANCED_DEFAULTS.temperature); setTopK(ADVANCED_DEFAULTS.topK); setTopP(ADVANCED_DEFAULTS.topP); setExtendStride(ADVANCED_DEFAULTS.extendStride); setUseGenrePresets(ADVANCED_DEFAULTS.useGenrePresets); setNumCandidates(ADVANCED_DEFAULTS.numCandidates); setAutoSelectBest(ADVANCED_DEFAULTS.autoSelectBest); }} style={{ fontSize: '10px', color: '#6366F1', background: 'none', border: '1px solid #6366F1', borderRadius: '4px', padding: '2px 6px', cursor: 'pointer' }}>Reset</button>}
                                     </div>
                                     <ChevronIcon size={16} color="#666" rotated={showAdvanced} />
                                 </div>
@@ -1509,7 +1619,19 @@ var App = () => {
                                 ) : generating && queue.length > 0 && (
                                     <LibraryItem item={{ title: 'Starting next song...', status: 'pending' }} isGenerating status="Please wait" elapsedTime={0} estimatedTime={0} />
                                 )}
-                                {library.filter(item => item.id !== currentGenId && !['generating', 'processing', 'pending'].includes(item.status)).map(item => <LibraryItem key={item.id} item={item} onDelete={() => deleteGeneration(item.id).then(loadLibrary)} onPlay={audioPlayer.play} onUpdate={loadLibrary} isCurrentlyPlaying={audioPlayer.playingId === item.id} isAudioPlaying={audioPlayer.isPlaying} playingTrackIdx={audioPlayer.playingTrackIdx} />)}
+                                {library.filter(item => item.id !== currentGenId && !['generating', 'processing', 'pending'].includes(item.status)).map(item => (
+                                    <LibraryItem
+                                        key={item.id}
+                                        item={item}
+                                        onDelete={() => deleteGeneration(item.id).then(loadLibrary)}
+                                        onPlay={audioPlayer.play}
+                                        onUpdate={loadLibrary}
+                                        onRemix={handleRemix}
+                                        isCurrentlyPlaying={audioPlayer.playingId === item.id}
+                                        isAudioPlaying={audioPlayer.isPlaying}
+                                        playingTrackIdx={audioPlayer.playingTrackIdx}
+                                    />
+                                ))}
                             </div>
                         )}
                     </div>

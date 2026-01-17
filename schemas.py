@@ -49,6 +49,39 @@ class StyleRequest(BaseModel):
     language: Optional[str] = None
     target_genre: Optional[str] = None
 
+class StructureRequest(BaseModel):
+    provider: str = "lmstudio"
+    model: str
+    base_url: Optional[str] = None
+    seed_words: str = ""
+    title: Optional[str] = None
+    language: Optional[str] = None
+    target_genre: Optional[str] = None
+    style: Optional[str] = None
+    length: str = "full"
+
+class RemixRequest(BaseModel):
+    provider: str = "lmstudio"
+    model: str
+    base_url: Optional[str] = None
+    song_model: str
+    prompt: str
+    title: Optional[str] = None
+    language: Optional[str] = None
+    sections: List[LyricsSection]
+    genre: Optional[str] = None
+    moods: Optional[List[str]] = None
+    timbres: Optional[List[str]] = None
+    instruments: Optional[List[str]] = None
+    bpm: Optional[int] = None
+    gender: Optional[str] = None
+    custom_style: Optional[str] = None
+    output_mode: Optional[str] = None
+    reference_audio_id: Optional[str] = None
+    arrangement_template: Optional[str] = None
+    advanced: Optional[dict] = None
+    length: str = "full"
+
 class SongRequest(BaseModel):
     title: str = "Untitled"
     sections: List[Section]
@@ -65,14 +98,14 @@ class SongRequest(BaseModel):
     model: str = "songgeneration_base"
     memory_mode: str = "auto"
     # Advanced generation parameters
-    cfg_coef: float = 1.5          # Classifier-free guidance (0.1-3.0)
-    temperature: float = 0.8       # Sampling randomness (0.1-2.0)
-    top_k: int = 50                # Top-K sampling (1-250)
-    top_p: float = 0.0             # Nucleus sampling, 0 = disabled (0.0-1.0)
-    extend_stride: int = 5         # Extension stride for longer songs
+    cfg_coef: float = 2.2          # Classifier-free guidance (0.1-3.0)
+    temperature: float = 0.7       # Sampling randomness (0.1-2.0)
+    top_k: int = 60                # Top-K sampling (1-250)
+    top_p: float = 0.9             # Nucleus sampling, 0 = disabled (0.0-1.0)
+    extend_stride: int = 6         # Extension stride for longer songs
     allow_intro_outro_lyrics: bool = False
     use_genre_presets: bool = True
-    num_candidates: int = 1
+    num_candidates: int = 2
     auto_select_best: bool = True
     arrangement_template: Optional[str] = None
 

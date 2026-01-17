@@ -104,6 +104,18 @@ var GENRE_TO_TEMPLATE = {
 // Duration widths for resizable sections
 var DURATION_WIDTHS = { short: 52, medium: 66, long: 80 };
 
+// High quality defaults for advanced generation
+var ADVANCED_DEFAULTS = {
+    cfgCoef: 2.2,
+    temperature: 0.7,
+    topK: 60,
+    topP: 0.9,
+    extendStride: 6,
+    numCandidates: 2,
+    autoSelectBest: true,
+    useGenrePresets: true,
+};
+
 // Suggestion lists
 var GENRE_SUGGESTIONS = [
     'Pop', 'Pop Rock', 'Indie Pop', 'Synth Pop', 'K-Pop', 'J-Pop', 'Latin Pop',

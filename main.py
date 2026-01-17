@@ -26,9 +26,20 @@ from config import (
     load_queue, save_queue, log_startup_info
 )
 from gpu import gpu_info, refresh_gpu_info, log_gpu_info
-from schemas import Section, SongRequest, UpdateGenerationRequest, LyricsRequest, LyricsModelsRequest, StyleRequest
+from schemas import (
+    Section,
+    SongRequest,
+    UpdateGenerationRequest,
+    LyricsRequest,
+    LyricsModelsRequest,
+    StyleRequest,
+    StructureRequest,
+    RemixRequest,
+)
 from lyrics_llm import generate_lyrics, list_models as list_lyric_models
 from style_llm import generate_style
+from structure_llm import generate_structure
+from remix_llm import generate_remix
 from timing import get_timing_stats
 from models import (
     MODEL_REGISTRY, get_model_status, get_model_status_quick,
@@ -291,6 +302,22 @@ async def generate_style_route(request: StyleRequest):
         return await asyncio.to_thread(generate_style, request)
     except Exception as exc:
         raise HTTPException(500, f"Style generation failed: {exc}")
+
+
+@app.post("/api/structure")
+async def generate_structure_route(request: StructureRequest):
+    try:
+        return await asyncio.to_thread(generate_structure, request)
+    except Exception as exc:
+        raise HTTPException(500, f"Structure generation failed: {exc}")
+
+
+@app.post("/api/remix")
+async def generate_remix_route(request: RemixRequest):
+    try:
+        return await asyncio.to_thread(generate_remix, request)
+    except Exception as exc:
+        raise HTTPException(500, f"Remix generation failed: {exc}")
 
 
 # Simple SSE test endpoint
