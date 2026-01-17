@@ -313,6 +313,13 @@ def start_model_download(model_id: str, notify_cb=None) -> dict:
         if status.get("status") == "downloading":
             return status
 
+        download_states[model_id] = {
+            "status": "downloading",
+            "progress": 0,
+            "downloaded_gb": 0,
+            "speed_mbps": 0,
+            "eta_seconds": 0,
+        }
         thread = threading.Thread(target=_download_worker, args=(model_id,), daemon=True)
         _download_threads[model_id] = thread
         thread.start()
