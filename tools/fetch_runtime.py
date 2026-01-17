@@ -23,7 +23,7 @@ def main() -> int:
     parser.add_argument(
         "--allow",
         action="append",
-        default=["ckpt/*", "third_party/*"],
+        default=["ckpt/**", "third_party/**"],
         help="Allow patterns to download (repeatable).",
     )
     parser.add_argument(
