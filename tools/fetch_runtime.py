@@ -4,8 +4,33 @@ from __future__ import annotations
 
 import argparse
 import os
-import sys
+from pathlib import Path
+
 from huggingface_hub import snapshot_download
+
+REQUIRED_FILES = (
+    "ckpt/vae/autoencoder_music_1320k.npz",
+    "ckpt/vae/stable_audio_1920_vae.json",
+)
+
+
+def _verify_assets(root: Path) -> list[str]:
+    missing: list[str] = []
+    for rel in REQUIRED_FILES:
+        if not (root / rel).exists():
+            missing.append(rel)
+    return missing
+
+
+def _cleanup_legacy_ckpt(root: Path) -> int:
+    removed = 0
+    for path in root.glob("ckpt/**/*.ckpt"):
+        try:
+            path.unlink()
+            removed += 1
+        except OSError:
+            continue
+    return removed
 
 
 def main() -> int:
@@ -45,6 +70,15 @@ def main() -> int:
         local_dir_use_symlinks=False,
         resume_download=True,
     )
+    root = Path(args.local_dir)
+    missing = _verify_assets(root)
+    if missing:
+        print("Missing MLX runtime assets:", ", ".join(missing))
+        print("Update the runtime repo or re-run download.")
+        return 1
+    removed = _cleanup_legacy_ckpt(root)
+    if removed:
+        print(f"Removed {removed} legacy .ckpt file(s).")
     return 0
 
 
