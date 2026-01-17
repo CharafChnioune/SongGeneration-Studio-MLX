@@ -191,6 +191,69 @@ def _count_sentences(text: str) -> int:
     return len([p for p in parts if p.strip()])
 
 
+def _selection_context(
+    prompt: str,
+    language: str,
+    length: str,
+    genre: str = "",
+    emotion: Optional[List[str]] = None,
+    timbre: Optional[List[str]] = None,
+    instruments: Optional[List[str]] = None,
+    bpm: Optional[int] = None,
+    gender: str = "",
+    structure: Optional[List[str]] = None,
+    lyrics: Optional[List[str]] = None,
+) -> str:
+    lines = [
+        f"Theme: {prompt}",
+        f"Language: {language}",
+        f"Length: {length}",
+        "Goal: chart-ready hit song with rich imagery and a memorable hook.",
+        "Only use verse/chorus/bridge sections. Skip intro/outro/inst sections (they are instrumental).",
+    ]
+    if genre:
+        lines.append(f"Selected genre: {genre}")
+    if emotion:
+        lines.append(f"Selected mood: {', '.join(emotion)}")
+    if timbre:
+        lines.append(f"Selected timbre: {', '.join(timbre)}")
+    if instruments:
+        lines.append(f"Selected instruments: {', '.join(instruments)}")
+    if bpm:
+        lines.append(f"Selected BPM: {bpm}")
+    if gender:
+        lines.append(f"Selected gender: {gender}")
+    if structure:
+        lines.append(f"Structure: {' | '.join(structure)}")
+    if lyrics:
+        joined = " ".join([l.strip() for l in lyrics if l.strip()])
+        if joined:
+            lines.append(f"Lyrics so far: {joined}")
+    lines.append("Use only the provided tags when possible.")
+    return "\n".join(lines)
+
+
+def _normalize_structure(structure: List[str], length: str) -> List[str]:
+    cleaned = [s for s in structure if s in _ALLOWED_SECTIONS]
+    if not cleaned:
+        cleaned = _structure_fallback(length)
+    # Ensure starts with verse
+    if cleaned and cleaned[0] != "verse":
+        cleaned.insert(0, "verse")
+    # Ensure at least 2 verses and 2 choruses
+    while cleaned.count("chorus") < 2:
+        cleaned.append("chorus")
+    while cleaned.count("verse") < 2:
+        cleaned.append("verse")
+    # Enforce length ranges
+    min_len, max_len = (5, 6) if length == "short" else (7, 8) if length == "medium" else (9, 10)
+    while len(cleaned) < min_len:
+        cleaned.append("chorus" if cleaned[-1] != "chorus" else "verse")
+    if len(cleaned) > max_len:
+        cleaned = cleaned[:max_len]
+    return cleaned
+
+
 def _structure_fallback(length: str) -> List[str]:
     return _DEFAULT_STRUCTURES.get(length, _DEFAULT_STRUCTURES["medium"])
 
@@ -214,14 +277,7 @@ def generate_ai_assist(request: Dict[str, Any]) -> Dict[str, Any]:
     allowed_timbres = sorted(_TAG_TIMBRES)
     allowed_instruments = sorted(_TAG_INSTRUMENTS)
 
-    base_context = (
-        f"Theme: {prompt}\n"
-        f"Language: {language}\n"
-        f"Length: {length}\n"
-        "Goal: chart-ready hit song with rich imagery and a memorable hook.\n"
-        "Only use verse/chorus/bridge sections. Skip intro/outro/inst sections (they are instrumental).\n"
-        "Use only the provided tags when possible."
-    )
+    base_context = _selection_context(prompt, language, length)
 
     def ask_json(task: str, guidance: str, context: str, temperature: float = 0.7, max_tokens: int = 180) -> Dict[str, Any]:
         strict = "Return ONLY a JSON object. No extra text, no markdown, no code fences."
@@ -253,7 +309,7 @@ def generate_ai_assist(request: Dict[str, Any]) -> Dict[str, Any]:
     genre = _coerce_tag(genre_json.get("genre"), _TAG_GENRES)
 
     # Step 2: mood / emotion
-    mood_context = f"{base_context}\nSelected genre: {genre}"
+    mood_context = _selection_context(prompt, language, length, genre=genre)
     mood_json = ask_json(
         "Pick 1-2 mood/emotion tags that fit the genre and theme.",
         f"Allowed mood tags: {', '.join(allowed_emotions)}\nJSON: {{\"emotion\": [\"<tag>\"]}}",
@@ -262,7 +318,7 @@ def generate_ai_assist(request: Dict[str, Any]) -> Dict[str, Any]:
     emotion = _coerce_tags(mood_json.get("emotion"), _TAG_EMOTIONS, max_items=2)
 
     # Step 3: timbre
-    timbre_context = f"{base_context}\nSelected genre: {genre}\nSelected mood: {', '.join(emotion) if emotion else 'none'}"
+    timbre_context = _selection_context(prompt, language, length, genre=genre, emotion=emotion)
     timbre_json = ask_json(
         "Pick 1-2 timbre tags that match the mood and genre.",
         f"Allowed timbre tags: {', '.join(allowed_timbres)}\nJSON: {{\"timbre\": [\"<tag>\"]}}",
@@ -271,7 +327,7 @@ def generate_ai_assist(request: Dict[str, Any]) -> Dict[str, Any]:
     timbre = _coerce_tags(timbre_json.get("timbre"), _TAG_TIMBRES, max_items=2)
 
     # Step 4: instruments
-    inst_context = f"{base_context}\nSelected genre: {genre}\nSelected mood: {', '.join(emotion) if emotion else 'none'}"
+    inst_context = _selection_context(prompt, language, length, genre=genre, emotion=emotion, timbre=timbre)
     inst_json = ask_json(
         "Pick 1-2 instrument tags that match the genre.",
         f"Allowed instrument tags: {', '.join(allowed_instruments)}\nJSON: {{\"instruments\": [\"<tag>\"]}}",
@@ -280,7 +336,7 @@ def generate_ai_assist(request: Dict[str, Any]) -> Dict[str, Any]:
     instruments = _coerce_tags(inst_json.get("instruments"), _TAG_INSTRUMENTS, max_items=2)
 
     # Step 5: bpm
-    bpm_context = f"{base_context}\nSelected genre: {genre}\nSelected mood: {', '.join(emotion) if emotion else 'none'}"
+    bpm_context = _selection_context(prompt, language, length, genre=genre, emotion=emotion, timbre=timbre, instruments=instruments)
     bpm_json = ask_json(
         "Pick a BPM (60-180) that fits the genre and mood.",
         "JSON: {\"bpm\": 94}",
@@ -289,7 +345,7 @@ def generate_ai_assist(request: Dict[str, Any]) -> Dict[str, Any]:
     bpm = _coerce_bpm(bpm_json.get("bpm"), fallback=94)
 
     # Step 6: gender
-    gender_context = f"{base_context}\nSelected genre: {genre}\nSelected mood: {', '.join(emotion) if emotion else 'none'}"
+    gender_context = _selection_context(prompt, language, length, genre=genre, emotion=emotion, timbre=timbre, instruments=instruments, bpm=bpm)
     gender_json = ask_json(
         "Pick a vocal gender (male or female) that fits the theme.",
         "JSON: {\"gender\": \"female\"}",
@@ -305,15 +361,13 @@ def generate_ai_assist(request: Dict[str, Any]) -> Dict[str, Any]:
         "JSON: {\"structure\": [\"verse\", \"chorus\", \"verse\", \"chorus\", \"bridge\", \"chorus\", \"verse\"]}"
     )
     try:
-        structure_context = f"{base_context}\nSelected genre: {genre}\nSelected mood: {', '.join(emotion) if emotion else 'none'}"
+        structure_context = _selection_context(prompt, language, length, genre=genre, emotion=emotion, timbre=timbre, instruments=instruments, bpm=bpm, gender=gender)
         structure_json = ask_json("Create a song structure.", structure_guidance, structure_context, temperature=0.5, max_tokens=200)
         structure_raw = structure_json.get("structure", [])
         if not isinstance(structure_raw, list):
             structure_raw = []
         structure = [s.strip().lower() for s in structure_raw if isinstance(s, str)]
-        structure = [s for s in structure if s in _ALLOWED_SECTIONS]
-        if not structure:
-            structure = _structure_fallback(length)
+        structure = _normalize_structure(structure, length)
     except Exception:
         structure = _structure_fallback(length)
 
@@ -338,15 +392,23 @@ def generate_ai_assist(request: Dict[str, Any]) -> Dict[str, Any]:
             f"Previous lyrics: {' '.join(lyric_context[-3:]) if lyric_context else 'None'}\n"
             f"{_build_section_prompt(section_type, length)}\n"
             "Avoid mentioning instruments or production. Avoid repeating the prompt verbatim.\n"
+            "Continue the song naturally after the lyrics so far. Do not repeat previous lines.\n"
             "Use complete sentences separated by periods. Do not add section labels.\n"
             "JSON: {\"lyrics\": \"Sentence one. Sentence two.\"}"
         )
-        lyric_context_text = (
-            f"{base_context}\nSelected genre: {genre}\nSelected mood: {', '.join(emotion) if emotion else 'none'}\n"
-            f"Selected timbre: {', '.join(timbre) if timbre else 'none'}\n"
-            f"Selected instruments: {', '.join(instruments) if instruments else 'none'}\n"
-            f"BPM: {bpm}\nGender: {gender}\nSection: {base}"
-        )
+        lyric_context_text = _selection_context(
+            prompt,
+            language,
+            length,
+            genre=genre,
+            emotion=emotion,
+            timbre=timbre,
+            instruments=instruments,
+            bpm=bpm,
+            gender=gender,
+            structure=structure,
+            lyrics=lyric_context,
+        ) + f"\nSection: {base}"
         lyric_json = ask_json("Write section lyrics.", section_prompt, lyric_context_text, temperature=0.8, max_tokens=450)
         lyrics_text = str(lyric_json.get("lyrics", "")).strip()
         min_sentences, _ = _sentence_target(section_type, length)
