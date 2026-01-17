@@ -40,3 +40,12 @@ class SongRequest(BaseModel):
 
 class UpdateGenerationRequest(BaseModel):
     title: Optional[str] = None
+
+
+class AIAssistRequest(BaseModel):
+    provider: str = "lmstudio"
+    base_url: Optional[str] = None
+    model: str
+    prompt: str
+    language: str = "English"
+    length: str = "medium"

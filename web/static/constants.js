@@ -38,6 +38,12 @@ var DEFAULT_SECTIONS = [
     { id: '5', type: 'outro-short', lyrics: '' },
 ];
 
+// AI provider defaults
+var AI_PROVIDER_DEFAULTS = {
+    lmstudio: { name: 'LM Studio', baseUrl: 'http://localhost:1234/v1', help: 'OpenAI-compatible' },
+    ollama: { name: 'Ollama', baseUrl: 'http://localhost:11434', help: 'Ollama chat API' },
+};
+
 // Duration widths for resizable sections
 var DURATION_WIDTHS = { short: 68, medium: 92 };
 

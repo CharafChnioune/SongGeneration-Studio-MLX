@@ -30,6 +30,7 @@ from schemas import (
     Section,
     SongRequest,
     UpdateGenerationRequest,
+    AIAssistRequest,
 )
 from timing import get_timing_stats
 from models import (
@@ -47,6 +48,7 @@ from generation import (
     generations, generation_lock, is_generation_active, get_active_generation_id,
     restore_library, run_generation
 )
+from llm_assist import generate_ai_assist
 
 # ============================================================================
 # Startup Initialization
@@ -417,6 +419,15 @@ async def get_reference_audio(ref_id: str):
     if not ref_files:
         raise HTTPException(404, "Reference audio not found")
     return FileResponse(ref_files[0], media_type='audio/wav')
+
+
+@app.post("/api/ai/assist")
+async def ai_assist(request: AIAssistRequest):
+    try:
+        result = await asyncio.to_thread(generate_ai_assist, request.dict())
+        return result
+    except Exception as e:
+        raise HTTPException(400, f"AI assist failed: {e}")
 
 
 @app.post("/api/generate")

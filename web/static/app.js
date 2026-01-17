@@ -14,6 +14,14 @@ var App = () => {
     const [customStyle, setCustomStyle] = useState('');
     const [bpm, setBpm] = useState(120);
     const [outputMode, setOutputMode] = useState(localStorage.getItem('output_mode') || 'mixed');
+    const [aiProvider, setAiProvider] = useState(localStorage.getItem('ai_provider') || 'lmstudio');
+    const [aiBaseUrl, setAiBaseUrl] = useState(localStorage.getItem('ai_base_url') || AI_PROVIDER_DEFAULTS.lmstudio.baseUrl);
+    const [aiModel, setAiModel] = useState(localStorage.getItem('ai_model') || '');
+    const [aiPrompt, setAiPrompt] = useState('');
+    const [aiLanguage, setAiLanguage] = useState(localStorage.getItem('ai_language') || 'English');
+    const [aiLength, setAiLength] = useState('medium');
+    const [aiBusy, setAiBusy] = useState(false);
+    const [aiError, setAiError] = useState('');
 
     // Generation state
     const [generating, setGenerating] = useState(false);
@@ -87,6 +95,16 @@ var App = () => {
     };
 
     useEffect(() => { localStorage.setItem('output_mode', outputMode); }, [outputMode]);
+    useEffect(() => {
+        const defaults = AI_PROVIDER_DEFAULTS[aiProvider];
+        if (defaults) setAiBaseUrl(defaults.baseUrl);
+    }, [aiProvider]);
+    useEffect(() => {
+        localStorage.setItem('ai_provider', aiProvider);
+        localStorage.setItem('ai_base_url', aiBaseUrl);
+        localStorage.setItem('ai_model', aiModel);
+        localStorage.setItem('ai_language', aiLanguage);
+    }, [aiProvider, aiBaseUrl, aiModel, aiLanguage]);
 
 
     // Load initial data
@@ -546,6 +564,53 @@ var App = () => {
         return String(value).split(',').map(v => v.trim()).filter(Boolean);
     };
 
+    const normalizeAiSections = (sectionsPayload) => {
+        if (!Array.isArray(sectionsPayload) || sectionsPayload.length === 0) return null;
+        return sectionsPayload.map((section, idx) => ({
+            id: `${Date.now()}-${idx}`,
+            type: section.type || 'verse',
+            lyrics: section.lyrics || '',
+        }));
+    };
+
+    const runAIAssist = async () => {
+        setAiError('');
+        if (!aiModel || !aiModel.trim()) {
+            setAiError('Add a model name for the AI provider.');
+            return;
+        }
+        if (!aiPrompt || !aiPrompt.trim()) {
+            setAiError('Add a prompt or theme for the AI.');
+            return;
+        }
+        setAiBusy(true);
+        try {
+            const payload = {
+                provider: aiProvider,
+                base_url: aiBaseUrl,
+                model: aiModel,
+                prompt: aiPrompt,
+                language: aiLanguage,
+                length: aiLength,
+            };
+            const result = await requestAIAssist(payload);
+            if (result.gender) setGender(result.gender);
+            if (result.genre) setGenres([result.genre]);
+            if (result.emotion) setMoods(splitTagList(result.emotion));
+            if (result.timbre) setTimbres(splitTagList(result.timbre));
+            if (result.instruments) setInstruments(splitTagList(result.instruments).slice(-1));
+            if (result.bpm) setBpm(Number(result.bpm));
+            if (result.custom_style) setCustomStyle(result.custom_style);
+
+            const updatedSections = normalizeAiSections(result.sections);
+            if (updatedSections) setSections(updatedSections);
+        } catch (e) {
+            setAiError(e.message || 'AI assist failed.');
+        } finally {
+            setAiBusy(false);
+        }
+    };
+
     const doStartGeneration = async (payload) => {
         console.log('[START-GEN] === STARTING NEW GENERATION ===');
         console.log('[START-GEN] Title:', payload.title);
@@ -805,10 +870,57 @@ var App = () => {
                                         </div>
                                     );
                                 })}
-                            <button onClick={() => setShowModelManager(true)} style={{ width: '100%', padding: '10px', backgroundColor: '#2a2a2a', border: '1px solid #444', borderRadius: '8px', color: '#fff', fontSize: '12px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
-                                <SettingsIcon /> Manage Models
-                            </button>
-                        </Card>
+                                <button onClick={() => setShowModelManager(true)} style={{ width: '100%', padding: '10px', backgroundColor: '#2a2a2a', border: '1px solid #444', borderRadius: '8px', color: '#fff', fontSize: '12px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
+                                    <SettingsIcon /> Manage Models
+                                </button>
+                            </Card>
+
+                            {/* AI Assist */}
+                            <Card>
+                                <CardTitle>AI Assist</CardTitle>
+                                <div style={{ marginBottom: '12px' }}>
+                                    <div style={{ fontSize: '12px', color: '#666', marginBottom: '8px' }}>Provider</div>
+                                    <select className="custom-select input-base" value={aiProvider} onChange={e => setAiProvider(e.target.value)} style={{ paddingRight: '40px', cursor: 'pointer' }}>
+                                        {Object.entries(AI_PROVIDER_DEFAULTS).map(([key, cfg]) => (
+                                            <option key={key} value={key}>{cfg.name}</option>
+                                        ))}
+                                    </select>
+                                    <div style={{ fontSize: '10px', color: '#555', marginTop: '6px' }}>{AI_PROVIDER_DEFAULTS[aiProvider]?.help}</div>
+                                </div>
+                                <div style={{ marginBottom: '12px' }}>
+                                    <div style={{ fontSize: '12px', color: '#666', marginBottom: '8px' }}>Base URL</div>
+                                    <input type="text" className="input-base" value={aiBaseUrl} onChange={e => setAiBaseUrl(e.target.value)} placeholder={AI_PROVIDER_DEFAULTS[aiProvider]?.baseUrl} />
+                                </div>
+                                <div style={{ marginBottom: '12px' }}>
+                                    <div style={{ fontSize: '12px', color: '#666', marginBottom: '8px' }}>Model</div>
+                                    <input type="text" className="input-base" value={aiModel} onChange={e => setAiModel(e.target.value)} placeholder="e.g. amsi-fin-mlx" />
+                                </div>
+                                <div style={{ marginBottom: '12px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                                    <div>
+                                        <div style={{ fontSize: '12px', color: '#666', marginBottom: '8px' }}>Language</div>
+                                        <select className="custom-select input-base" value={aiLanguage} onChange={e => setAiLanguage(e.target.value)} style={{ paddingRight: '40px', cursor: 'pointer' }}>
+                                            {['English', 'Chinese'].map(lang => <option key={lang} value={lang}>{lang}</option>)}
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <div style={{ fontSize: '12px', color: '#666', marginBottom: '8px' }}>Length</div>
+                                        <select className="custom-select input-base" value={aiLength} onChange={e => setAiLength(e.target.value)} style={{ paddingRight: '40px', cursor: 'pointer' }}>
+                                            {['short', 'medium', 'full'].map(size => <option key={size} value={size}>{size}</option>)}
+                                        </select>
+                                    </div>
+                                </div>
+                                <div style={{ marginBottom: '12px' }}>
+                                    <div style={{ fontSize: '12px', color: '#666', marginBottom: '8px' }}>Prompt / Theme</div>
+                                    <textarea className="input-base" value={aiPrompt} onChange={e => setAiPrompt(e.target.value)} placeholder="Describe the song idea..." rows={4} style={{ resize: 'vertical' }} />
+                                </div>
+                                {aiError && <div style={{ color: '#EF4444', fontSize: '11px', marginBottom: '8px' }}>{aiError}</div>}
+                                <button onClick={runAIAssist} disabled={aiBusy} style={{ width: '100%', padding: '12px', borderRadius: '10px', border: '1px solid #10B981', backgroundColor: aiBusy ? '#1f3d33' : '#10B98115', color: '#10B981', fontSize: '12px', cursor: aiBusy ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+                                    {aiBusy ? <><SpinnerIcon size={14} /> Generating...</> : 'Generate Genre + Mood + Structure + Lyrics'}
+                                </button>
+                                <div style={{ fontSize: '10px', color: '#555', marginTop: '8px' }}>
+                                    The assistant fills tags, builds a structure, and writes lyrics using the paper-aligned format.
+                                </div>
+                            </Card>
 
                         {/* Song Settings */}
                         <Card>
