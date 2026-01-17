@@ -195,9 +195,10 @@ def generate_ai_assist(request: Dict[str, Any]) -> Dict[str, Any]:
 
     def ask_json(task: str, guidance: str, context: str, temperature: float = 0.7, max_tokens: int = 180) -> Dict[str, Any]:
         strict = "Return ONLY a JSON object. No extra text, no markdown, no code fences."
+        system_prompt = f"{strict}\nContext:\n{context}"
         messages = [
-            {"role": "system", "content": strict},
-            {"role": "user", "content": f"{context}\nTask: {task}\n{guidance}"},
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": f"Task: {task}\n{guidance}"},
         ]
         for attempt in range(2):
             content = _call_chat(provider, base_url, model, messages, temperature, max_tokens)
@@ -206,8 +207,8 @@ def generate_ai_assist(request: Dict[str, Any]) -> Dict[str, Any]:
             except Exception:
                 if attempt == 0:
                     messages = [
-                        {"role": "system", "content": strict},
-                        {"role": "user", "content": f"{context}\nTask: {task}\n{guidance}\nReturn ONLY JSON. If unsure, return an empty JSON object."},
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": f"Task: {task}\n{guidance}\nReturn ONLY JSON. If unsure, return an empty JSON object."},
                     ]
                     continue
                 return {}
