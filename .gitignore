@@ -20,6 +20,10 @@ sample/*.mp3
 **/model_int8.npz
 **/model_int4.npz
 **/model_fp32.npz
+songgeneration_base/
+songgeneration_base_new/
+songgeneration_base_full/
+songgeneration_large/
 
 # Directory with trailing space (artifact)
 SongGeneration-large\ /

@@ -33,19 +33,26 @@ python tools/fetch_runtime.py --local-dir .
 
 This downloads `ckpt/` and `third_party/` from the runtime assets repo.
 
-## MLX model weights
+## MLX model weights (auto-download)
 
-Place MLX weights next to each `config.yaml` in the model folders. The app will auto-detect weights in this order:
+On first run, the app will **automatically download** the recommended model (based on your available memory) from Hugging Face.
 
-- `model_fp16.npz`
-- `model_int8.npz`
+You can also open **Manage Models** in the UI to download or remove models at any time.
 
-Model folders in this repo:
+By default, models are pulled from these repos:
 
-- `songgeneration_base`
-- `songgeneration_base_new`
-- `songgeneration_base_full`
-- `songgeneration_large`
+- `AITRADER/SongGeneration-Base-MLX`
+- `AITRADER/SongGeneration-Base-New-MLX`
+- `AITRADER/SongGeneration-Base-Full-MLX`
+- `AITRADER/SongGeneration-Large-MLX`
+
+If you need to override the source repos, set:
+
+```
+SONGGEN_MLX_HF_REPO
+SONGGEN_MLX_HF_LAYOUT
+SONGGEN_MLX_HF_PREFIX
+```
 
 ## Run the Web UI
 
@@ -56,6 +63,8 @@ python main.py --host 127.0.0.1 --port 8000
 Open `http://127.0.0.1:8000`.
 
 ## CLI (MLX)
+
+Make sure you have downloaded the model first (via the UI or by placing weights in the model folder).
 
 ```bash
 python generate_mlx.py \
