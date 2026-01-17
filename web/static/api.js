@@ -80,3 +80,14 @@ var requestAIAssist = async (payload) => {
     if (!r.ok) throw new Error(await r.text());
     return r.json();
 };
+
+var fetchAiModels = async (provider, baseUrl) => {
+    const params = new URLSearchParams({
+        provider: provider || 'lmstudio',
+        base_url: baseUrl || '',
+    });
+    const r = await fetch(`/api/ai/models?${params.toString()}`);
+    if (!r.ok) throw new Error(await r.text());
+    const data = await r.json();
+    return data.models || [];
+};

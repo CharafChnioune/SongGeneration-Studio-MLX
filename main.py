@@ -14,6 +14,7 @@ from datetime import datetime
 from typing import Optional
 from contextlib import asynccontextmanager
 
+import requests
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form, BackgroundTasks, Response, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, StreamingResponse
@@ -428,6 +429,33 @@ async def ai_assist(request: AIAssistRequest):
         return result
     except Exception as e:
         raise HTTPException(400, f"AI assist failed: {e}")
+
+
+@app.get("/api/ai/models")
+async def ai_models(provider: str = "lmstudio", base_url: Optional[str] = None):
+    provider = (provider or "lmstudio").strip().lower()
+    try:
+        if provider == "lmstudio":
+            url = (base_url or "http://localhost:1234/v1").rstrip("/")
+            if not url.endswith("/v1"):
+                url = f"{url}/v1"
+            resp = requests.get(f"{url}/models", timeout=20)
+            resp.raise_for_status()
+            data = resp.json()
+            models = [item.get("id") or item.get("name") for item in data.get("data", [])]
+        elif provider == "ollama":
+            url = (base_url or "http://localhost:11434").rstrip("/")
+            resp = requests.get(f"{url}/api/tags", timeout=20)
+            resp.raise_for_status()
+            data = resp.json()
+            models = [item.get("name") for item in data.get("models", [])]
+        else:
+            raise ValueError("Unknown provider. Use 'lmstudio' or 'ollama'.")
+
+        clean = [m for m in models if m]
+        return {"models": sorted(set(clean))}
+    except Exception as e:
+        raise HTTPException(400, f"AI model list failed: {e}")
 
 
 @app.post("/api/generate")

@@ -22,6 +22,9 @@ var App = () => {
     const [aiLength, setAiLength] = useState('medium');
     const [aiBusy, setAiBusy] = useState(false);
     const [aiError, setAiError] = useState('');
+    const [aiModels, setAiModels] = useState([]);
+    const [aiModelsLoading, setAiModelsLoading] = useState(false);
+    const [aiModelsError, setAiModelsError] = useState('');
 
     // Generation state
     const [generating, setGenerating] = useState(false);
@@ -105,6 +108,27 @@ var App = () => {
         localStorage.setItem('ai_model', aiModel);
         localStorage.setItem('ai_language', aiLanguage);
     }, [aiProvider, aiBaseUrl, aiModel, aiLanguage]);
+
+    const loadAiModels = async () => {
+        setAiModelsLoading(true);
+        setAiModelsError('');
+        try {
+            const list = await fetchAiModels(aiProvider, aiBaseUrl);
+            setAiModels(list);
+            if (list.length && !list.includes(aiModel)) {
+                setAiModel(list[0]);
+            }
+        } catch (e) {
+            setAiModels([]);
+            setAiModelsError(e.message || 'Unable to load models.');
+        } finally {
+            setAiModelsLoading(false);
+        }
+    };
+
+    useEffect(() => {
+        loadAiModels();
+    }, [aiProvider, aiBaseUrl]);
 
 
     // Load initial data
@@ -893,7 +917,25 @@ var App = () => {
                                 </div>
                                 <div style={{ marginBottom: '12px' }}>
                                     <div style={{ fontSize: '12px', color: '#666', marginBottom: '8px' }}>Model</div>
-                                    <input type="text" className="input-base" value={aiModel} onChange={e => setAiModel(e.target.value)} placeholder="e.g. amsi-fin-mlx" />
+                                    {aiModelsLoading ? (
+                                        <div style={{ fontSize: '11px', color: '#888', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                            <SpinnerIcon size={14} /> Loading models...
+                                        </div>
+                                    ) : (
+                                        <>
+                                            <select className="custom-select input-base" value={aiModels.length && aiModels.includes(aiModel) ? aiModel : ''} onChange={e => setAiModel(e.target.value)} style={{ paddingRight: '40px', cursor: 'pointer' }}>
+                                                <option value="">Custom model...</option>
+                                                {aiModels.map(modelId => <option key={modelId} value={modelId}>{modelId}</option>)}
+                                            </select>
+                                            {(!aiModels.length || !aiModels.includes(aiModel)) && (
+                                                <input type="text" className="input-base" value={aiModel} onChange={e => setAiModel(e.target.value)} placeholder="e.g. amsi-fin-mlx" style={{ marginTop: '8px' }} />
+                                            )}
+                                        </>
+                                    )}
+                                    {aiModelsError && <div style={{ color: '#EF4444', fontSize: '10px', marginTop: '6px' }}>{aiModelsError}</div>}
+                                    {!aiModelsLoading && (
+                                        <button onClick={loadAiModels} style={{ marginTop: '8px', background: 'none', border: 'none', color: '#10B981', fontSize: '11px', cursor: 'pointer' }}>Refresh list</button>
+                                    )}
                                 </div>
                                 <div style={{ marginBottom: '12px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
                                     <div>
