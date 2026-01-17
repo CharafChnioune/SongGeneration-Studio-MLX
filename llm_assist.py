@@ -17,21 +17,15 @@ from generation import _TAG_GENRES, _TAG_EMOTIONS, _TAG_TIMBRES, _TAG_INSTRUMENT
 
 
 _ALLOWED_SECTIONS = {
-    "intro-short",
-    "intro-medium",
     "verse",
     "chorus",
     "bridge",
-    "outro-short",
-    "outro-medium",
-    "inst-short",
-    "inst-medium",
 }
 
 _DEFAULT_STRUCTURES = {
-    "short": ["intro-short", "verse", "chorus", "verse", "chorus", "outro-short"],
-    "medium": ["intro-medium", "verse", "chorus", "verse", "chorus", "bridge", "chorus", "outro-medium"],
-    "full": ["intro-medium", "verse", "chorus", "verse", "chorus", "bridge", "verse", "chorus", "outro-medium"],
+    "short": ["verse", "chorus", "verse", "chorus", "bridge"],
+    "medium": ["verse", "chorus", "verse", "chorus", "bridge", "chorus", "verse"],
+    "full": ["verse", "chorus", "verse", "chorus", "bridge", "verse", "chorus", "verse", "chorus"],
 }
 
 
@@ -159,22 +153,22 @@ def _sentence_target(section_type: str, length: str) -> tuple[int, int]:
     base = section_type.split("-", 1)[0]
     if length == "short":
         if base == "chorus":
-            return 3, 4
+            return 4, 5
         if base == "bridge":
-            return 2, 3
-        return 3, 4
+            return 3, 4
+        return 5, 6
     if length == "full":
         if base == "chorus":
-            return 6, 7
+            return 6, 8
         if base == "bridge":
-            return 4, 5
-        return 7, 8
+            return 5, 6
+        return 8, 10
     # medium
     if base == "chorus":
-        return 4, 5
+        return 5, 6
     if base == "bridge":
-        return 3, 4
-    return 5, 6
+        return 4, 5
+    return 6, 8
 
 
 def _build_section_prompt(section_type: str, length: str) -> str:
@@ -187,6 +181,14 @@ def _build_section_prompt(section_type: str, length: str) -> str:
     else:
         extra = "Tell the story with vivid imagery and forward momentum."
     return f"Write {low}-{high} sentences. {extra}"
+
+
+def _count_sentences(text: str) -> int:
+    cleaned = re.sub(r"\s+", " ", text.strip())
+    if not cleaned:
+        return 0
+    parts = re.split(r"[.!?]+", cleaned)
+    return len([p for p in parts if p.strip()])
 
 
 def _structure_fallback(length: str) -> List[str]:
@@ -217,6 +219,7 @@ def generate_ai_assist(request: Dict[str, Any]) -> Dict[str, Any]:
         f"Language: {language}\n"
         f"Length: {length}\n"
         "Goal: chart-ready hit song with rich imagery and a memorable hook.\n"
+        "Only use verse/chorus/bridge sections. Skip intro/outro/inst sections (they are instrumental).\n"
         "Use only the provided tags when possible."
     )
 
@@ -296,11 +299,10 @@ def generate_ai_assist(request: Dict[str, Any]) -> Dict[str, Any]:
 
     # Step 7: structure
     structure_guidance = (
-        "Return a list of section types using only these labels: "
-        "intro-short, intro-medium, verse, chorus, bridge, outro-short, outro-medium. "
-        "Avoid inst labels. Include at least 2 verses and 2 choruses. "
+        "Return a list of section types using only: verse, chorus, bridge. "
+        "Include at least 2 verses and 2 choruses. "
         "Length rules: short=5-6 sections, medium=7-8 sections, full=9-10 sections.\n"
-        "JSON: {\"structure\": [\"intro-medium\", \"verse\", \"chorus\", \"verse\", \"chorus\", \"bridge\", \"chorus\", \"outro-medium\"]}"
+        "JSON: {\"structure\": [\"verse\", \"chorus\", \"verse\", \"chorus\", \"bridge\", \"chorus\", \"verse\"]}"
     )
     try:
         structure_context = f"{base_context}\nSelected genre: {genre}\nSelected mood: {', '.join(emotion) if emotion else 'none'}"
@@ -345,21 +347,36 @@ def generate_ai_assist(request: Dict[str, Any]) -> Dict[str, Any]:
             f"Selected instruments: {', '.join(instruments) if instruments else 'none'}\n"
             f"BPM: {bpm}\nGender: {gender}\nSection: {base}"
         )
-        lyric_json = ask_json("Write section lyrics.", section_prompt, lyric_context_text, temperature=0.8, max_tokens=400)
+        lyric_json = ask_json("Write section lyrics.", section_prompt, lyric_context_text, temperature=0.8, max_tokens=450)
         lyrics_text = str(lyric_json.get("lyrics", "")).strip()
-        if len(lyrics_text) < 40:
-            stronger = section_prompt + "\nReturn longer, richer lyrics. Do not return empty text."
-            lyric_json = ask_json("Write section lyrics.", stronger, lyric_context_text, temperature=0.85, max_tokens=500)
+        min_sentences, _ = _sentence_target(section_type, length)
+        if _count_sentences(lyrics_text) < min_sentences or len(lyrics_text) < 120:
+            expand_prompt = (
+                f"Expand these lyrics by adding {max(2, min_sentences)} more sentences.\n"
+                f"Current lyrics: {lyrics_text}\n"
+                "Append new sentences at the end. Keep the same theme and voice.\n"
+                "JSON: {\"lyrics\": \"<expanded full lyrics>\"}"
+            )
+            lyric_json = ask_json("Expand section lyrics.", expand_prompt, lyric_context_text, temperature=0.85, max_tokens=600)
             lyrics_text = str(lyric_json.get("lyrics", "")).strip()
-        if len(lyrics_text) < 20:
+        if _count_sentences(lyrics_text) < min_sentences or len(lyrics_text) < 120:
+            expand_prompt = (
+                f"Make the lyrics longer and richer. Ensure at least {min_sentences} sentences.\n"
+                f"Current lyrics: {lyrics_text}\n"
+                "Return the full expanded lyrics.\n"
+                "JSON: {\"lyrics\": \"<expanded full lyrics>\"}"
+            )
+            lyric_json = ask_json("Expand section lyrics.", expand_prompt, lyric_context_text, temperature=0.9, max_tokens=700)
+            lyrics_text = str(lyric_json.get("lyrics", "")).strip()
+        if _count_sentences(lyrics_text) < min_sentences:
             seed = prompt or "We rise tonight"
-            lyrics_text = f"{seed}. We chase the night. We hold the line. We turn this into gold."
+            filler = "We chase the night. We hold the line. We turn the pain to gold."
+            lyrics_text = f"{seed}. {filler}"
         return lyrics_text
 
     for idx, section_type in enumerate(structure, start=1):
         base = section_type.split("-", 1)[0]
         if base not in ("verse", "chorus", "bridge"):
-            sections.append({"type": section_type, "lyrics": ""})
             continue
         lyrics_text = generate_section_lyrics(section_type, idx)
         lyric_context.append(lyrics_text)
