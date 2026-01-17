@@ -12,7 +12,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--repo",
-        default="lglg666/SongGeneration-Runtime",
+        default="AITRADER/SongGeneration-Runtime-MLX",
         help="Hugging Face repo ID for runtime assets.",
     )
     parser.add_argument(
