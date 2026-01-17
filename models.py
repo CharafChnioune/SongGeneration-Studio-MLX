@@ -5,6 +5,8 @@ SongGeneration Studio - MLX Model Registry & Download Manager.
 from __future__ import annotations
 
 import shutil
+import subprocess
+import sys
 import threading
 import time
 from pathlib import Path
@@ -62,6 +64,24 @@ download_states: Dict[str, dict] = {}
 _download_threads: Dict[str, threading.Thread] = {}
 _download_cancel_flags: Dict[str, threading.Event] = {}
 _download_lock = threading.Lock()
+_runtime_lock = threading.Lock()
+
+RUNTIME_REQUIRED = (
+    BASE_DIR / "ckpt" / "vae" / "stable_audio_1920_vae.json",
+    BASE_DIR / "ckpt" / "vae" / "autoencoder_music_1320k.npz",
+)
+
+
+def _ensure_runtime_assets() -> None:
+    missing = [path for path in RUNTIME_REQUIRED if not path.exists()]
+    if not missing:
+        return
+    script = BASE_DIR / "tools" / "fetch_runtime.py"
+    if not script.exists():
+        missing_list = ", ".join(str(path) for path in missing)
+        raise RuntimeError(f"Missing runtime assets: {missing_list}")
+    print("[RUNTIME] Downloading MLX runtime assets (requested by model download)...", flush=True)
+    subprocess.check_call([sys.executable, str(script), "--local-dir", str(BASE_DIR)])
 
 
 def _model_dir(model_id: str) -> Path:
@@ -171,6 +191,8 @@ def _download_worker(model_id: str) -> None:
         return
 
     try:
+        with _runtime_lock:
+            _ensure_runtime_assets()
         api = HfApi()
         info = api.model_info(repo_id=repo_id)
         prefix = f"{model_id}/" if HF_MODEL_LAYOUT == "single" else ""

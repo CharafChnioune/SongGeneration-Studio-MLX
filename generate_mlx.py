@@ -190,12 +190,11 @@ def ensure_runtime_assets(base_dir: Path, needs_separator: bool) -> None:
     missing = [path for path in required if not path.exists()]
     if not missing:
         return
-    script = base_dir / "tools" / "fetch_runtime.py"
-    if not script.exists():
-        missing_list = ", ".join(str(path) for path in missing)
-        raise FileNotFoundError(f"Missing runtime assets ({missing_list}) and fetch_runtime.py not found")
-    print("[RUNTIME] Missing assets, downloading runtime bundle...")
-    subprocess.check_call([sys.executable, str(script), "--local-dir", str(base_dir)])
+    missing_list = ", ".join(str(path) for path in missing)
+    raise FileNotFoundError(
+        "Missing runtime assets. Download by selecting a model in the UI "
+        f"or run tools/fetch_runtime.py manually. Missing: {missing_list}"
+    )
 
 
 def main():
