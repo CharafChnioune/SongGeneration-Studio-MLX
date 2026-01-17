@@ -5,12 +5,12 @@ var { useState, useEffect, useRef, useCallback, useMemo } = React;
 
 // Section type configurations
 var SECTION_TYPES = {
-    'intro': { name: 'Intro', color: '#8B5CF6', hasLyrics: true, hasDuration: true },
+    'intro': { name: 'Intro', color: '#8B5CF6', hasLyrics: false, hasDuration: true },
     'verse': { name: 'Verse', color: '#3B82F6', hasLyrics: true, hasDuration: false },
     'chorus': { name: 'Chorus', color: '#F59E0B', hasLyrics: true, hasDuration: false },
     'bridge': { name: 'Bridge', color: '#EC4899', hasLyrics: true, hasDuration: false },
     'inst': { name: 'Inst', color: '#10B981', hasLyrics: false, hasDuration: true },
-    'outro': { name: 'Outro', color: '#EAB308', hasLyrics: true, hasDuration: true },
+    'outro': { name: 'Outro', color: '#EAB308', hasLyrics: false, hasDuration: true },
     'prechorus': { name: 'Pre-Chorus', color: '#06B6D4', hasLyrics: true, hasDuration: false },
 };
 
@@ -75,19 +75,20 @@ var ARRANGEMENT_TEMPLATES = [
         id: 'rock_anthem',
         name: 'Rock Anthem',
         description: 'Big chorus, extended outro.',
-        sections: ['intro-short', 'verse', 'chorus', 'verse', 'chorus', 'bridge', 'chorus', 'outro-long'],
+        sections: ['intro-short', 'verse', 'chorus', 'verse', 'chorus', 'bridge', 'chorus', 'outro-medium'],
     },
     {
         id: 'edm_build',
         name: 'EDM Build',
         description: 'Build + drop + outro.',
-        sections: ['intro-short', 'inst-medium', 'verse', 'prechorus', 'chorus', 'inst-short', 'chorus', 'outro-long'],
+        sections: ['intro-medium', 'verse', 'prechorus', 'chorus', 'verse', 'chorus', 'bridge', 'chorus', 'outro-medium'],
     },
 ];
 
 var GENRE_TO_TEMPLATE = {
     'hiphop': 'hiphop_story',
     'hip-hop': 'hiphop_story',
+    'hip hop': 'hiphop_story',
     'rap': 'hiphop_story',
     'trap': 'trap_bounce',
     'pop': 'pop_hit',

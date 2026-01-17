@@ -7,6 +7,7 @@ import time
 import random
 import subprocess
 import sys
+import gc
 from pathlib import Path
 from typing import Optional
 
@@ -39,7 +40,7 @@ def ensure_stereo(audio: np.ndarray) -> np.ndarray:
     raise ValueError(f"Unsupported audio shape {audio.shape}")
 
 
-def load_audio(path: str, target_sr: int) -> np.ndarray:
+def load_audio(path: str, target_sr: int, max_seconds: Optional[float] = None) -> np.ndarray:
     audio, sr = sf.read(path, always_2d=True)
     audio = audio.T
     if sr != target_sr:
@@ -53,6 +54,9 @@ def load_audio(path: str, target_sr: int) -> np.ndarray:
         ]
         audio = np.stack(resampled, axis=0)
     audio = ensure_stereo(audio)
+    if max_seconds:
+        max_samples = int(target_sr * max_seconds)
+        audio = audio[:, :max_samples]
     return audio.astype(np.float32)
 
 
@@ -284,17 +288,6 @@ def main():
     os.makedirs(os.path.join(args.save_dir, "jsonl"), exist_ok=True)
 
     separator = None
-    if needs_separator:
-        if args.separator_backend == "none":
-            raise ValueError("prompt_audio_path requires a separator unless prompt stems are provided")
-        separator = create_separator(
-            backend=args.separator_backend,
-            model_path=args.separator_model,
-            sample_rate=args.separator_sample_rate,
-            chunk_seconds=args.separator_chunk_seconds,
-            overlap=args.separator_overlap,
-            vocals_index=args.separator_vocals_index,
-        )
 
     auto_prompt = None
     for item in new_items:
@@ -324,13 +317,13 @@ def main():
                 raise FileNotFoundError(f"prompt_vocal_path {prompt_vocal_path} not found")
             if not os.path.exists(prompt_bgm_path):
                 raise FileNotFoundError(f"prompt_bgm_path {prompt_bgm_path} not found")
-            prompt_vocal = load_audio(prompt_vocal_path, cfg.sample_rate)
-            prompt_bgm = load_audio(prompt_bgm_path, cfg.sample_rate)
+            prompt_vocal = load_audio(prompt_vocal_path, cfg.sample_rate, max_seconds=10.0)
+            prompt_bgm = load_audio(prompt_bgm_path, cfg.sample_rate, max_seconds=10.0)
             if has_prompt_audio:
                 prompt_path = item["prompt_audio_path"]
                 if not os.path.exists(prompt_path):
                     raise FileNotFoundError(f"prompt_audio_path {prompt_path} not found")
-                prompt_audio = load_audio(prompt_path, cfg.sample_rate)
+                prompt_audio = load_audio(prompt_path, cfg.sample_rate, max_seconds=10.0)
             else:
                 min_len = min(prompt_vocal.shape[-1], prompt_bgm.shape[-1])
                 prompt_audio = prompt_vocal[:, :min_len] + prompt_bgm[:, :min_len]
@@ -347,14 +340,35 @@ def main():
             if audiotokenizer is None:
                 raise ValueError("Audio tokenizer is required for prompt_audio_path but was not initialized")
             if seperate_tokenizer is not None:
-                if separator is None:
-                    raise ValueError("Separator is required for prompt_audio_path when stems are not provided")
-                prompt_audio, prompt_vocal, prompt_bgm = separator.run(prompt_path, target_sr=cfg.sample_rate)
+                prompt_audio = load_audio(prompt_path, cfg.sample_rate, max_seconds=10.0)
+                prompt_vocal = None
+                prompt_bgm = None
+                if args.separator_backend != "none":
+                    try:
+                        if separator is None:
+                            separator = create_separator(
+                                backend=args.separator_backend,
+                                model_path=args.separator_model,
+                                sample_rate=args.separator_sample_rate,
+                                chunk_seconds=args.separator_chunk_seconds,
+                                overlap=args.separator_overlap,
+                                vocals_index=args.separator_vocals_index,
+                            )
+                        prompt_audio, prompt_vocal, prompt_bgm = separator.run(prompt_path, target_sr=cfg.sample_rate)
+                    except Exception as exc:
+                        print(f"[WARN] Separator failed ({exc}); falling back to mid/side split.", flush=True)
+                    finally:
+                        if separator is not None:
+                            separator.close()
+                        separator = None
+                        gc.collect()
+                if prompt_vocal is None or prompt_bgm is None:
+                    prompt_vocal, prompt_bgm = split_prompt_audio(prompt_audio)
                 melody_wavs = prompt_audio[None, ...]
                 vocal_wavs = prompt_vocal[None, ...]
                 bgm_wavs = prompt_bgm[None, ...]
             else:
-                prompt_audio = load_audio(prompt_path, cfg.sample_rate)
+                prompt_audio = load_audio(prompt_path, cfg.sample_rate, max_seconds=10.0)
                 melody_wavs = prompt_audio[None, ...]
             melody_is_wav = True
         elif "auto_prompt_audio_type" in item:

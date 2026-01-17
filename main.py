@@ -79,7 +79,8 @@ async def get_all_models():
     """Get all models with their current status."""
     models = []
     for model_id, info in MODEL_REGISTRY.items():
-        status = get_model_status_quick(model_id)
+        available = info.get("available", True)
+        status = "coming_soon" if not available else get_model_status_quick(model_id)
 
         model_data = {
             "id": model_id,
@@ -88,7 +89,8 @@ async def get_all_models():
             "vram_required": info["vram_required"],
             "size_gb": info["size_gb"],
             "status": status,
-            "warmth": "ready" if status == "ready" else "cold",
+            "available": available,
+            "warmth": "ready" if status == "ready" else ("coming_soon" if status == "coming_soon" else "cold"),
         }
 
         if status == "downloading":
@@ -98,6 +100,8 @@ async def get_all_models():
                 "downloaded_gb": progress.get("downloaded_gb", 0),
                 "speed_mbps": progress.get("speed_mbps", 0),
                 "eta_seconds": progress.get("eta_seconds", 0),
+                "download_total_gb": progress.get("total_gb", 0),
+                "download_stage": progress.get("stage"),
             })
 
         models.append(model_data)

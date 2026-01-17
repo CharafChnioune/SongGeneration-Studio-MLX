@@ -33,11 +33,9 @@ python tools/fetch_runtime.py --local-dir .
 
 This downloads `ckpt/` and `third_party/` from the runtime assets repo.
 
-## MLX model weights (auto-download)
+## MLX model weights (download when selected)
 
-On first run, the app will **automatically download** the recommended model (based on your available memory) from Hugging Face.
-
-You can also open **Manage Models** in the UI to download or remove models at any time.
+Open **Manage Models** in the UI to download or remove models. The app does not auto-download models on first run.
 
 By default, models are pulled from these repos:
 
@@ -76,6 +74,11 @@ python generate_mlx.py \
 
 Outputs `.flac` + `.wav` in `output/cli/audios/`.
 
+## Lyrics format notes
+
+- `[intro-short]`, `[intro-medium]`, `[inst-short]`, `[inst-medium]`, `[outro-short]`, `[outro-medium]` are instrumental (lyrics are ignored).
+- If a `-long` tag is used, it is normalized to `-medium` for compatibility.
+
 ## Prompt audio (optional)
 
 - Provide `prompt_audio_path` in the JSONL to condition on a reference.
@@ -99,3 +102,20 @@ output/<generation_id>/generation.log
 ## Credits
 
 Based on Tencent AI Lab's SongGeneration research and assets, adapted here as a fully MLX-only studio.
+
+## Upcoming v1.5 models (prep)
+
+The v1.5 models are marked as **Coming soon** in the Model Manager. When the MLX weights are ready, you can:
+
+1) Add the Hugging Face repo to `MODEL_REGISTRY` (or flip `available: true`).
+2) Validate the local model layout:
+
+```bash
+python tools/validate_mlx_model.py --model-dir /path/to/songgeneration_v1_5_small
+```
+
+Expected files for each model:
+
+- `config.yaml`
+- `model_fp16.npz` (required)
+- `model_int8.npz` (optional, recommended)

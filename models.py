@@ -57,7 +57,38 @@ MODEL_REGISTRY: Dict[str, dict] = {
         "size_gb": 20.5,
         "priority": 4,
     },
+    "songgeneration_v15_small": {
+        "name": "SongGeneration v1.5 - Small (2m)",
+        "description": "Coming soon (multilingual v1.5), MLX weights",
+        "vram_required": 0,
+        "hf_repo": "AITRADER/SongGeneration-v1.5-small-MLX",
+        "size_gb": 0.0,
+        "priority": 0,
+        "available": False,
+    },
+    "songgeneration_v15_base": {
+        "name": "SongGeneration v1.5 - Base (4m30s)",
+        "description": "Coming soon (multilingual v1.5), MLX weights",
+        "vram_required": 0,
+        "hf_repo": "AITRADER/SongGeneration-v1.5-base-MLX",
+        "size_gb": 0.0,
+        "priority": 0,
+        "available": False,
+    },
+    "songgeneration_v15_large": {
+        "name": "SongGeneration v1.5 - Large (4m30s)",
+        "description": "Coming soon (multilingual v1.5), MLX weights",
+        "vram_required": 0,
+        "hf_repo": "AITRADER/SongGeneration-v1.5-large-MLX",
+        "size_gb": 0.0,
+        "priority": 0,
+        "available": False,
+    },
 }
+
+# Hugging Face repo for runtime assets (ckpt + third_party).
+RUNTIME_REPO = "AITRADER/SongGeneration-Runtime-MLX"
+RUNTIME_PREFIXES = ("ckpt/", "third_party/")
 
 # Download state tracking (lightweight)
 download_states: Dict[str, dict] = {}
@@ -69,7 +100,13 @@ _runtime_lock = threading.Lock()
 RUNTIME_REQUIRED = (
     BASE_DIR / "ckpt" / "vae" / "stable_audio_1920_vae.json",
     BASE_DIR / "ckpt" / "vae" / "autoencoder_music_1320k.npz",
+    BASE_DIR / "third_party" / "demucs" / "ckpt" / "htdemucs.onnx",
 )
+
+
+def _is_available(model_id: str) -> bool:
+    info = MODEL_REGISTRY.get(model_id, {})
+    return info.get("available", True)
 
 
 def _ensure_runtime_assets() -> None:
@@ -107,12 +144,29 @@ def _resolve_hf_repo(model_id: str) -> Optional[str]:
     return HF_MODEL_REPO or None
 
 
+def _list_repo_files(api: HfApi, repo_id: str, prefixes: tuple[str, ...]) -> List[dict]:
+    info = api.model_info(repo_id=repo_id)
+    files: List[dict] = []
+    total_bytes = 0
+    for sibling in info.siblings:
+        name = sibling.rfilename
+        if prefixes and not any(name.startswith(prefix) for prefix in prefixes):
+            continue
+        size = sibling.size or 0
+        files.append({"remote": name, "rel": name, "size": size})
+        total_bytes += size
+    return files, total_bytes
+
+
 def get_model_status(model_id: str) -> str:
     if model_id in download_states and download_states[model_id].get("status") == "downloading":
         return "downloading"
 
     if model_id not in MODEL_REGISTRY:
         return "not_downloaded"
+
+    if not _is_available(model_id):
+        return "coming_soon"
 
     model_dir = _model_dir(model_id)
     if not model_dir.exists():
@@ -156,7 +210,11 @@ def get_recommended_model(refresh: bool = False) -> str:
     if refresh:
         refresh_gpu_info()
     available_gb = _available_memory_gb()
-    candidates = sorted(MODEL_REGISTRY.items(), key=lambda x: x[1]["priority"], reverse=True)
+    candidates = sorted(
+        [(mid, info) for mid, info in MODEL_REGISTRY.items() if info.get("available", True)],
+        key=lambda x: x[1]["priority"],
+        reverse=True,
+    )
     if available_gb is None:
         return candidates[0][0] if candidates else "songgeneration_base"
     for model_id, info in candidates:
@@ -169,7 +227,11 @@ def get_best_ready_model(refresh: bool = False) -> Optional[str]:
     if refresh:
         refresh_gpu_info()
     available_gb = _available_memory_gb()
-    ready = [mid for mid in MODEL_REGISTRY if get_model_status_quick(mid) == "ready"]
+    ready = [
+        mid
+        for mid in MODEL_REGISTRY
+        if _is_available(mid) and get_model_status_quick(mid) == "ready"
+    ]
     if not ready:
         return None
     ready_sorted = sorted(ready, key=lambda mid: MODEL_REGISTRY[mid]["priority"], reverse=True)
@@ -191,15 +253,23 @@ def _download_worker(model_id: str) -> None:
         return
 
     try:
-        with _runtime_lock:
-            _ensure_runtime_assets()
         api = HfApi()
-        info = api.model_info(repo_id=repo_id)
+
+        runtime_files: List[dict] = []
+        runtime_total = 0
+        with _runtime_lock:
+            missing_runtime = [path for path in RUNTIME_REQUIRED if not path.exists()]
+            if missing_runtime:
+                runtime_files, runtime_total = _list_repo_files(api, RUNTIME_REPO, RUNTIME_PREFIXES)
+                if not runtime_files:
+                    raise RuntimeError(f"No runtime files found in {RUNTIME_REPO}")
+
         prefix = f"{model_id}/" if HF_MODEL_LAYOUT == "single" else ""
         wanted = set(MLX_WEIGHT_PREFERENCE + ("config.yaml", "README.md"))
-        files = []
-        total_bytes = 0
+        model_files: List[dict] = []
+        model_total = 0
 
+        info = api.model_info(repo_id=repo_id)
         for sibling in info.siblings:
             name = sibling.rfilename
             if prefix and not name.startswith(prefix):
@@ -208,25 +278,33 @@ def _download_worker(model_id: str) -> None:
             if rel not in wanted:
                 continue
             size = sibling.size or 0
-            files.append({"remote": name, "rel": rel, "size": size})
-            total_bytes += size
+            model_files.append({"remote": name, "rel": rel, "size": size})
+            model_total += size
 
-        if not files:
+        if not model_files:
             raise RuntimeError(f"No model files found in {repo_id}")
 
         model_dir = _model_dir(model_id)
         model_dir.mkdir(parents=True, exist_ok=True)
 
+        total_bytes = runtime_total + model_total
         downloaded_bytes = 0
-        for item in files:
-            dest = model_dir / item["rel"]
-            if dest.exists() and item["size"] and dest.stat().st_size == item["size"]:
-                downloaded_bytes += item["size"]
+
+        def count_existing(files: List[dict], base_dir: Path) -> int:
+            total = 0
+            for item in files:
+                dest = base_dir / item["rel"]
+                if dest.exists() and item["size"] and dest.stat().st_size == item["size"]:
+                    total += item["size"]
+            return total
+
+        downloaded_bytes += count_existing(runtime_files, BASE_DIR)
+        downloaded_bytes += count_existing(model_files, model_dir)
 
         last_time = time.time()
         last_bytes = downloaded_bytes
 
-        def update_progress(current_bytes: int) -> None:
+        def update_progress(current_bytes: int, stage: str) -> None:
             nonlocal last_time, last_bytes
             now = time.time()
             if now - last_time < 1.0:
@@ -246,52 +324,63 @@ def _download_worker(model_id: str) -> None:
                 "downloaded_gb": round(current_bytes / (1024 ** 3), 2),
                 "speed_mbps": round(speed / (1024 ** 2), 2),
                 "eta_seconds": eta,
+                "total_gb": round(total_bytes / (1024 ** 3), 2),
+                "stage": stage,
             }
 
         token = HfFolder.get_token()
         headers = {"Authorization": f"Bearer {token}"} if token else {}
 
-        for item in files:
-            dest = model_dir / item["rel"]
-            expected = item["size"]
-            if dest.exists() and expected and dest.stat().st_size == expected:
-                update_progress(downloaded_bytes)
-                continue
+        def download_files(files: List[dict], base_dir: Path, stage: str, repo: str) -> None:
+            nonlocal downloaded_bytes
+            for item in files:
+                dest = base_dir / item["rel"]
+                expected = item["size"]
+                if dest.exists() and expected and dest.stat().st_size == expected:
+                    update_progress(downloaded_bytes, stage)
+                    continue
 
-            tmp_path = dest.with_suffix(dest.suffix + ".part")
-            existing = tmp_path.stat().st_size if tmp_path.exists() else 0
-            if dest.exists() and expected and dest.stat().st_size != expected:
-                dest.unlink()
+                tmp_path = dest.with_suffix(dest.suffix + ".part")
+                existing = tmp_path.stat().st_size if tmp_path.exists() else 0
+                if dest.exists() and expected and dest.stat().st_size != expected:
+                    dest.unlink()
 
-            url = hf_hub_url(repo_id=repo_id, filename=item["remote"], repo_type="model")
-            req_headers = dict(headers)
-            if existing > 0:
-                req_headers["Range"] = f"bytes={existing}-"
+                url = hf_hub_url(repo_id=repo, filename=item["remote"], repo_type="model")
+                req_headers = dict(headers)
+                if existing > 0:
+                    req_headers["Range"] = f"bytes={existing}-"
 
-            with requests.get(url, headers=req_headers, stream=True, timeout=30) as resp:
-                if resp.status_code == 416:
-                    if tmp_path.exists():
-                        tmp_path.unlink()
-                    existing = 0
-                    req_headers.pop("Range", None)
-                    resp = requests.get(url, headers=req_headers, stream=True, timeout=30)
-                resp.raise_for_status()
-                mode = "ab" if existing > 0 else "wb"
-                with open(tmp_path, mode) as f:
-                    for chunk in resp.iter_content(chunk_size=8 * 1024 * 1024):
-                        if not chunk:
-                            continue
-                        f.write(chunk)
-                        existing += len(chunk)
-                        current_total = downloaded_bytes + existing
-                        update_progress(current_total)
+                with requests.get(url, headers=req_headers, stream=True, timeout=30) as resp:
+                    if resp.status_code == 416:
+                        if tmp_path.exists():
+                            tmp_path.unlink()
+                        existing = 0
+                        req_headers.pop("Range", None)
+                        resp = requests.get(url, headers=req_headers, stream=True, timeout=30)
+                    resp.raise_for_status()
+                    mode = "ab" if existing > 0 else "wb"
+                    dest.parent.mkdir(parents=True, exist_ok=True)
+                    with open(tmp_path, mode) as f:
+                        for chunk in resp.iter_content(chunk_size=8 * 1024 * 1024):
+                            if not chunk:
+                                continue
+                            f.write(chunk)
+                            existing += len(chunk)
+                            update_progress(downloaded_bytes + existing, stage)
 
-            tmp_size = tmp_path.stat().st_size if tmp_path.exists() else 0
-            if expected and tmp_size != expected:
-                raise RuntimeError(f"Incomplete download for {item['rel']}: {tmp_size} / {expected}")
-            tmp_path.replace(dest)
-            downloaded_bytes += tmp_size
-            update_progress(downloaded_bytes)
+                tmp_size = tmp_path.stat().st_size if tmp_path.exists() else 0
+                if expected and tmp_size != expected:
+                    raise RuntimeError(f"Incomplete download for {item['rel']}: {tmp_size} / {expected}")
+                tmp_path.replace(dest)
+                downloaded_bytes += tmp_size
+                update_progress(downloaded_bytes, stage)
+
+        if runtime_files:
+            update_progress(downloaded_bytes, "runtime")
+            download_files(runtime_files, BASE_DIR, "runtime", RUNTIME_REPO)
+
+        update_progress(downloaded_bytes, "model")
+        download_files(model_files, model_dir, "model", repo_id)
 
         download_states[model_id] = {
             "status": "completed",
@@ -299,6 +388,8 @@ def _download_worker(model_id: str) -> None:
             "downloaded_gb": round(total_bytes / (1024 ** 3), 2),
             "speed_mbps": 0,
             "eta_seconds": 0,
+            "total_gb": round(total_bytes / (1024 ** 3), 2),
+            "stage": "model",
         }
     except Exception as exc:
         download_states[model_id] = {"status": "error", "error": str(exc)}
@@ -307,6 +398,8 @@ def _download_worker(model_id: str) -> None:
 def start_model_download(model_id: str, notify_cb=None) -> dict:
     if model_id not in MODEL_REGISTRY:
         return {"error": "Unknown model"}
+    if not _is_available(model_id):
+        return {"error": "Model is marked as coming soon"}
 
     with _download_lock:
         status = download_states.get(model_id, {})

@@ -11,6 +11,7 @@ import threading
 import sys
 import random
 import shutil
+import os
 
 import numpy as np
 import librosa
@@ -83,6 +84,7 @@ _GENRE_PRESETS = {
 
 _GENRE_PRESET_ALIASES = {
     "hiphop": "hip-hop",
+    "hip hop": "hip-hop",
     "rap": "hip-hop",
     "gangster rap": "hip-hop",
     "trap rap": "trap",
@@ -90,6 +92,199 @@ _GENRE_PRESET_ALIASES = {
     "house": "edm",
     "techno": "edm",
 }
+
+_TAG_DIR = BASE_DIR / "sample" / "description"
+
+
+def _load_tag_list(filename: str) -> set[str]:
+    path = _TAG_DIR / filename
+    if not path.exists():
+        return set()
+    tags = []
+    with open(path, "r", encoding="utf-8") as f:
+        for line in f:
+            tag = line.strip()
+            if tag:
+                tags.append(tag.lower())
+    return set(tags)
+
+
+_TAG_GENRES = _load_tag_list("genre.txt")
+_TAG_EMOTIONS = _load_tag_list("emotion.txt")
+_TAG_TIMBRES = _load_tag_list("timbre.txt")
+_TAG_INSTRUMENTS = _load_tag_list("instrument.txt")
+
+_GENRE_ALIASES = {
+    "hip-hop": "hip hop",
+    "hiphop": "hip hop",
+    "hip hop": "hip hop",
+    "rnb": "r&b",
+    "r&b": "r&b",
+    "kpop": "k-pop",
+    "k-pop": "k-pop",
+}
+
+_EMOTION_ALIASES = {
+    "energetic": "intense",
+    "motivational": "uplifting",
+    "uplift": "uplifting",
+    "sadness": "sad",
+    "anger": "angry",
+    "melancholy": "melancholic",
+}
+
+_TIMBRE_ALIASES = {
+    "gritty": "dark",
+    "harsh": "dark",
+    "raspy": "dark",
+    "smooth": "soft",
+    "airy": "vocal",
+}
+
+_INSTRUMENT_ALIASES = {
+    "drums": "drums",
+    "kick": "drums",
+    "snare": "drums",
+    "clap": "drums",
+    "hi-hats": "drums",
+    "hihats": "drums",
+    "hi hat": "drums",
+    "percussion": "drums",
+    "cymbals": "drums",
+    "toms": "drums",
+    "shakers": "drums",
+    "tambourine": "drums",
+    "drum machine": "beats",
+    "808": "beats",
+    "beats": "beats",
+    "turntables": "beats",
+    "scratch": "beats",
+    "piano": "piano",
+    "electric piano": "piano",
+    "rhodes": "piano",
+    "wurlitzer": "piano",
+    "keys": "piano",
+    "guitar": "guitar",
+    "electric guitar": "electric guitar",
+    "acoustic guitar": "acoustic guitar",
+    "bass": "bass",
+    "synth bass": "bass",
+    "sub bass": "bass",
+    "synthesizer": "synthesizer",
+    "synth": "synthesizer",
+    "pad": "synthesizer",
+    "lead synth": "synthesizer",
+    "arpeggiator": "synthesizer",
+    "violin": "violin",
+    "cello": "cello",
+    "saxophone": "saxophone",
+    "trumpet": "trumpet",
+    "banjo": "banjo",
+    "harmonica": "harmonica",
+    "fiddle": "fiddle",
+}
+
+
+def _split_tags(value: str) -> List[str]:
+    if not value:
+        return []
+    parts = []
+    for part in value.split(","):
+        cleaned = part.strip()
+        if cleaned:
+            parts.append(cleaned)
+    return parts
+
+
+def _normalize_tags(
+    raw: str,
+    allowed: set[str],
+    aliases: dict[str, str],
+    max_items: int,
+) -> tuple[List[str], List[str]]:
+    tags: List[str] = []
+    extras: List[str] = []
+    for item in _split_tags(raw):
+        key = aliases.get(item.lower(), item.lower())
+        if key in allowed:
+            if key not in tags:
+                tags.append(key)
+        else:
+            extras.append(item)
+    if max_items:
+        tags = tags[:max_items]
+    return tags, extras
+
+
+def _normalize_genre(raw: str) -> tuple[str, List[str]]:
+    tags, extras = _normalize_tags(raw, _TAG_GENRES, _GENRE_ALIASES, max_items=1)
+    return (tags[0] if tags else ""), extras
+
+
+def _extract_instrument_bases(raw: str) -> tuple[set[str], List[str]]:
+    bases: set[str] = set()
+    extras: List[str] = []
+    for item in _split_tags(raw):
+        lower = item.lower()
+        mapped = _INSTRUMENT_ALIASES.get(lower)
+        if mapped:
+            bases.add(mapped)
+            continue
+        matched = False
+        for key, base in _INSTRUMENT_ALIASES.items():
+            if key in lower:
+                bases.add(base)
+                matched = True
+                break
+        if not matched:
+            extras.append(item)
+    return bases, extras
+
+
+def _pick_instrument_tag(bases: set[str], genre_tag: str) -> str:
+    if not bases and genre_tag in ("hip hop", "rap"):
+        return "beats"
+    if "beats" in bases and "piano" in bases:
+        return "beats and piano"
+    if "beats" in bases:
+        return "beats"
+    if "drums" in bases and "piano" in bases:
+        return "piano and drums"
+    if "drums" in bases and "electric guitar" in bases:
+        return "electric guitar and drums"
+    if "drums" in bases and "acoustic guitar" in bases:
+        return "acoustic guitar and drums"
+    if "drums" in bases and "guitar" in bases:
+        return "guitar and drums"
+    if "drums" in bases and "bass" in bases:
+        return "bass and drums"
+    if "drums" in bases and "synthesizer" in bases:
+        return "synthesizer and drums"
+    if "piano" in bases and "guitar" in bases:
+        return "piano and guitar"
+    if "piano" in bases and "synthesizer" in bases:
+        return "piano and synthesizer"
+    if "synthesizer" in bases and "electric guitar" in bases:
+        return "synthesizer and electric guitar"
+    if "synthesizer" in bases and "guitar" in bases:
+        return "synthesizer and guitar"
+    if "synthesizer" in bases and "bass" in bases:
+        return "synthesizer and bass"
+    if "piano" in bases and "violin" in bases:
+        return "piano and violin"
+    if "violin" in bases and "piano" in bases:
+        return "violin and piano"
+    if "piano" in bases:
+        return "piano"
+    if "synthesizer" in bases:
+        return "synthesizer"
+    if "guitar" in bases or "electric guitar" in bases or "acoustic guitar" in bases:
+        return "guitar"
+    if "violin" in bases:
+        return "violin"
+    if "saxophone" in bases:
+        return "saxophone"
+    return ""
 
 _CANDIDATE_VARIATIONS = [
     {"cfg": 0.0, "temp": 0.0, "top_k": 0, "top_p": 0.0},
@@ -346,8 +541,10 @@ def _normalize_auto_prompt_type(value: Optional[str]) -> Optional[str]:
 _DURATION_TAG_SECONDS = {
     "short": 6.0,
     "medium": 12.0,
-    "long": 18.0,
+    "long": 12.0,
 }
+
+_MLX_SAFE_MAX_DURATION = float(os.environ.get("SONGGEN_MLX_MAX_DURATION", "180"))
 
 _BAR_TARGETS = {
     "verse": 2.0,
@@ -427,6 +624,8 @@ def _estimate_duration(
         base, *rest = section.type.split("-", 1)
         base = base.lower()
         duration_tag = rest[0].lower() if rest else ""
+        if duration_tag == "long":
+            duration_tag = "medium"
         if base == "pre" and duration_tag == "chorus":
             base = "prechorus"
             duration_tag = ""
@@ -496,11 +695,10 @@ def build_lyrics_string(sections: List[Section], allow_intro_outro: bool = False
         # Extract base type (e.g., "verse" from "verse" or "intro" from "intro-short")
         base_type = section.type.split('-')[0].lower()
         tag_type = section.type
-        if base_type in ("intro", "outro", "inst") and "-" not in section.type:
+        if base_type in ("intro", "outro", "inst") and section.type.endswith("-long"):
+            tag_type = f"{base_type}-medium"
+        elif base_type in ("intro", "outro", "inst") and "-" not in section.type:
             tag_type = f"{base_type}-short"
-        # Force vocal sections for intro/outro when lyrics are provided.
-        if section.lyrics and base_type in ("intro", "outro"):
-            tag_type = "verse"
         tag = f"[{tag_type}]"
 
         if section.lyrics and base_type in vocal_types:
@@ -529,23 +727,49 @@ def build_description(request: SongRequest, exclude_genre: bool = False) -> str:
     """Build the description string for style control."""
     parts = []
 
+    custom_extras: List[str] = []
+
     if request.gender and request.gender != "auto":
-        parts.append(request.gender)
+        parts.append(request.gender.lower())
 
-    if request.timbre:
-        parts.append(request.timbre)
+    timbres, timbre_extras = _normalize_tags(request.timbre or "", _TAG_TIMBRES, _TIMBRE_ALIASES, max_items=2)
+    parts.extend(timbres)
+    custom_extras.extend(timbre_extras)
 
+    genre_tag = ""
     if not exclude_genre and request.genre and request.genre != "Auto":
-        parts.append(request.genre)
+        genre_tag, genre_extras = _normalize_genre(request.genre)
+        if genre_tag:
+            parts.append(genre_tag)
+        custom_extras.extend(genre_extras)
 
-    if request.emotion:
-        parts.append(request.emotion)
+    emotions, emotion_extras = _normalize_tags(request.emotion or "", _TAG_EMOTIONS, _EMOTION_ALIASES, max_items=2)
+    parts.extend(emotions)
+    custom_extras.extend(emotion_extras)
 
-    if request.instruments:
-        parts.append(request.instruments)
+    bases, instrument_extras = _extract_instrument_bases(request.instruments or "")
+    instrument_tag = _pick_instrument_tag(bases, genre_tag)
+    if instrument_tag and instrument_tag in _TAG_INSTRUMENTS:
+        parts.append(instrument_tag)
+    custom_extras.extend(instrument_extras)
 
     if request.custom_style:
-        parts.append(request.custom_style)
+        custom_extras.append(request.custom_style)
+
+    if custom_extras:
+        unique = []
+        seen = set()
+        for item in custom_extras:
+            cleaned = item.strip()
+            if not cleaned:
+                continue
+            key = cleaned.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            unique.append(cleaned)
+        if unique:
+            parts.append(", ".join(unique[:4]))
 
     if request.bpm:
         parts.append(f"the bpm is {request.bpm}")
@@ -777,8 +1001,8 @@ async def run_generation(
                         genre_for_auto_prompt = first_genre
                         auto_prompt_source = "genre_map"
                     else:
-                        auto_type = None
-                        auto_prompt_source = "disabled_for_genre"
+                        auto_type = "Auto"
+                        auto_prompt_source = "default"
                 else:
                     auto_prompt_source = "explicit"
             else:
@@ -885,6 +1109,14 @@ async def run_generation(
             allow_intro_outro=request.allow_intro_outro_lyrics,
             bpm=request.bpm,
         )
+        if _MLX_SAFE_MAX_DURATION > 0 and duration > _MLX_SAFE_MAX_DURATION:
+            _append_generation_log(
+                output_subdir,
+                gen_id,
+                "Duration capped",
+                {"estimated_duration": duration, "cap_seconds": _MLX_SAFE_MAX_DURATION},
+            )
+            duration = _MLX_SAFE_MAX_DURATION
 
         def build_cmd(save_dir: Path, params: dict, seed: Optional[int]) -> List[str]:
             cmd = [
@@ -987,10 +1219,16 @@ async def run_generation(
             )
 
             if proc.returncode != 0:
+                error_detail = stderr_text or stdout_text or "unknown error"
+                if proc.returncode < 0:
+                    signal_id = -proc.returncode
+                    error_detail = f"process_killed_signal_{signal_id} (possible OOM)."
+                    if stderr_text:
+                        error_detail = f"{error_detail} {stderr_text}"
                 candidate_results.append({
                     "id": candidate_id,
                     "status": "failed",
-                    "error": stderr_text or stdout_text or "unknown error",
+                    "error": error_detail,
                 })
                 continue
 

@@ -114,6 +114,10 @@ class BaseSeparator:
     def _separate(self, audio: np.ndarray) -> np.ndarray:
         raise NotImplementedError
 
+    def close(self) -> None:
+        """Release separator resources when possible."""
+        return None
+
 
 class OnnxSeparator(BaseSeparator):
     def __init__(
@@ -273,6 +277,9 @@ class OnnxSeparator(BaseSeparator):
         output = output / weight[None, None, :]
         return output
 
+    def close(self) -> None:
+        self.session = None
+
 
 class CoreMLSeparator(BaseSeparator):
     def __init__(
@@ -353,6 +360,9 @@ class CoreMLSeparator(BaseSeparator):
         weight = np.maximum(weight, 1e-8)
         output = output / weight[None, None, :]
         return output
+
+    def close(self) -> None:
+        self.model = None
 
 
 def create_separator(

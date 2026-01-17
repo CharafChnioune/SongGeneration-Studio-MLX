@@ -102,9 +102,10 @@ var App = () => {
     const formatDownloadDetails = (model) => {
         if (!model) return '';
         const parts = [];
-        if (model.size_gb) {
+        const totalGb = model.download_total_gb || model.size_gb;
+        if (totalGb) {
             const downloaded = Number(model.downloaded_gb || 0).toFixed(2);
-            const total = Number(model.size_gb).toFixed(1);
+            const total = Number(totalGb).toFixed(1);
             parts.push(`${downloaded} / ${total} GB`);
         }
         if (model.speed_mbps && model.speed_mbps > 0) {
@@ -112,6 +113,9 @@ var App = () => {
         }
         if (model.eta_seconds && model.eta_seconds > 0) {
             parts.push(`ETA ${formatEta(model.eta_seconds)}`);
+        }
+        if (model.download_stage) {
+            parts.unshift(model.download_stage === 'runtime' ? 'Runtime assets' : 'Model files');
         }
         return parts.join(' | ');
     };
@@ -617,7 +621,7 @@ var App = () => {
         instruments: instruments.join(', '), custom_style: customStyle, bpm, output_mode: outputMode,
         model: modelState.selectedModel, reference_audio_id: useReference ? refId : null,
         cfg_coef: cfgCoef, temperature, top_k: topK, top_p: topP, extend_stride: extendStride,
-        allow_intro_outro_lyrics: true,
+        allow_intro_outro_lyrics: false,
         use_genre_presets: useGenrePresets,
         num_candidates: numCandidates,
         auto_select_best: autoSelectBest,
@@ -641,7 +645,7 @@ var App = () => {
         if (mo && mo.length) parts.push(mo.join(', '));
         if (ins && ins.length) parts.push(ins.join(', '));
         if (cs) parts.push(cs);
-        if (bpmValue) parts.push(`bpm ${bpmValue}`);
+        if (bpmValue) parts.push(`the bpm is ${bpmValue}`);
         return parts.join(', ');
     };
 
@@ -732,8 +736,7 @@ var App = () => {
     const buildLyricsSections = (sourceSections) => (sourceSections || sections).map(s => {
         const { base } = fromApiType(s.type);
         const cfg = SECTION_TYPES[base] || { hasLyrics: true };
-        const allowIntroOutro = (base === 'intro' || base === 'outro');
-        return { type: s.type, has_lyrics: cfg.hasLyrics || allowIntroOutro, lyrics: s.lyrics || '' };
+        return { type: s.type, has_lyrics: cfg.hasLyrics, lyrics: s.lyrics || '' };
     });
 
     const applyGeneratedLyrics = (respSections, baseSections) => {
@@ -1078,14 +1081,16 @@ var App = () => {
                                 )}
                                 {modelState.allModels.filter(m => m.status === 'downloading').map(m => {
                                     const details = formatDownloadDetails(m);
+                                    const stageLabel = m.download_stage === 'runtime' ? 'Runtime assets' : 'Model files';
+                                    const isIndeterminate = !m.progress || m.progress <= 0;
                                     return (
                                         <div key={m.id} style={{ backgroundColor: 'rgba(245, 158, 11, 0.1)', border: '1px solid rgba(245, 158, 11, 0.3)', borderRadius: '8px', padding: '10px 12px', marginBottom: '12px' }}>
                                             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
-                                                <span style={{ fontSize: '12px', color: '#F59E0B', fontWeight: '500' }}>Downloading {m.name}</span>
+                                                <span style={{ fontSize: '12px', color: '#F59E0B', fontWeight: '500' }}>Downloading {stageLabel}</span>
                                                 <span style={{ fontSize: '11px', color: '#888' }}>{m.progress || 0}%</span>
                                             </div>
-                                            <div style={{ height: '6px', backgroundColor: 'rgba(245, 158, 11, 0.2)', borderRadius: '3px', overflow: 'hidden' }}>
-                                                <div style={{ width: `${m.progress || 0}%`, height: '100%', backgroundColor: '#F59E0B', borderRadius: '3px', transition: 'width 0.3s' }} />
+                                            <div className={isIndeterminate ? 'progress-bar-indeterminate' : ''} style={{ height: '6px', backgroundColor: 'rgba(245, 158, 11, 0.2)', borderRadius: '3px', overflow: 'hidden' }}>
+                                                {!isIndeterminate && <div style={{ width: `${m.progress || 0}%`, height: '100%', backgroundColor: '#F59E0B', borderRadius: '3px', transition: 'width 0.3s' }} />}
                                             </div>
                                             {details && <div style={{ marginTop: '6px', fontSize: '10px', color: '#C0841A' }}>{details}</div>}
                                             <button onClick={() => modelState.cancelDownload(m.id)} style={{ background: 'none', border: 'none', color: '#EF4444', cursor: 'pointer', padding: '2px 6px', fontSize: '10px', marginTop: '6px' }}>Cancel</button>
@@ -1572,16 +1577,26 @@ var App = () => {
                                             <div style={{ textAlign: 'right', fontSize: '11px', color: '#666' }}><div>{m.size_gb}GB</div><div>{m.vram_required}GB VRAM</div></div>
                                         </div>
                                         {m.status === 'ready' && <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}><span style={{ fontSize: '12px', color: '#10B981' }}><CheckIcon /> Ready</span><button onClick={() => modelState.deleteModel(m.id)} style={{ padding: '6px 12px', fontSize: '11px', backgroundColor: 'transparent', color: '#EF4444', border: '1px solid rgba(239, 68, 68, 0.3)', borderRadius: '6px', cursor: 'pointer' }}>Delete</button></div>}
-                                        {m.status === 'downloading' && (
-                                            <div>
-                                                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
-                                                    <span style={{ fontSize: '12px', color: '#F59E0B' }}>Downloading... {m.progress || 0}%</span>
-                                                    <button onClick={() => modelState.cancelDownload(m.id)} style={{ padding: '4px 10px', fontSize: '11px', backgroundColor: 'transparent', color: '#EF4444', border: '1px solid rgba(239, 68, 68, 0.3)', borderRadius: '6px', cursor: 'pointer' }}>Cancel</button>
+                                        {m.status === 'downloading' && (() => {
+                                            const stageLabel = m.download_stage === 'runtime' ? 'Runtime assets' : 'Model files';
+                                            const isIndeterminate = !m.progress || m.progress <= 0;
+                                            return (
+                                                <div>
+                                                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+                                                        <span style={{ fontSize: '12px', color: '#F59E0B' }}>Downloading {stageLabel}... {m.progress || 0}%</span>
+                                                        <button onClick={() => modelState.cancelDownload(m.id)} style={{ padding: '4px 10px', fontSize: '11px', backgroundColor: 'transparent', color: '#EF4444', border: '1px solid rgba(239, 68, 68, 0.3)', borderRadius: '6px', cursor: 'pointer' }}>Cancel</button>
+                                                    </div>
+                                                    <div className={isIndeterminate ? 'progress-bar-indeterminate' : ''} style={{ height: '6px', backgroundColor: '#333', borderRadius: '3px', overflow: 'hidden' }}>
+                                                        {!isIndeterminate && <div style={{ width: `${m.progress || 0}%`, height: '100%', backgroundColor: '#F59E0B', transition: 'width 0.3s' }} />}
+                                                    </div>
+                                                    {downloadDetails && <div style={{ marginTop: '8px', fontSize: '11px', color: '#C0841A' }}>{downloadDetails}</div>}
                                                 </div>
-                                                <div style={{ height: '6px', backgroundColor: '#333', borderRadius: '3px', overflow: 'hidden' }}>
-                                                    <div style={{ width: `${m.progress || 0}%`, height: '100%', backgroundColor: '#F59E0B', transition: 'width 0.3s' }} />
-                                                </div>
-                                                {downloadDetails && <div style={{ marginTop: '8px', fontSize: '11px', color: '#C0841A' }}>{downloadDetails}</div>}
+                                            );
+                                        })()}
+                                        {m.status === 'coming_soon' && (
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                                <span style={{ fontSize: '12px', color: '#F59E0B' }}>Coming soon</span>
+                                                <button disabled style={{ padding: '6px 12px', fontSize: '11px', backgroundColor: 'transparent', color: '#555', border: '1px solid #333', borderRadius: '6px', cursor: 'not-allowed' }}>Unavailable</button>
                                             </div>
                                         )}
                                         {m.status === 'not_downloaded' && <button onClick={() => modelState.startDownload(m.id)} style={{ width: '100%', padding: '10px', fontSize: '12px', backgroundColor: '#10B981', color: '#fff', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: '500' }}>Download ({m.size_gb}GB)</button>}

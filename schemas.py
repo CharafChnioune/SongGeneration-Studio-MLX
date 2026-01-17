@@ -70,7 +70,7 @@ class SongRequest(BaseModel):
     top_k: int = 50                # Top-K sampling (1-250)
     top_p: float = 0.0             # Nucleus sampling, 0 = disabled (0.0-1.0)
     extend_stride: int = 5         # Extension stride for longer songs
-    allow_intro_outro_lyrics: bool = True
+    allow_intro_outro_lyrics: bool = False
     use_genre_presets: bool = True
     num_candidates: int = 1
     auto_select_best: bool = True

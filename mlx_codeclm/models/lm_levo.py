@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 import random
 import typing as tp
+from collections import deque
 from dataclasses import dataclass
 from tqdm import tqdm
 
@@ -243,7 +244,7 @@ class LmModel(StreamingModule):
             prepare_null_condition=True,
         )
 
-        record_token_pool = [] if record_tokens else None
+        record_token_pool = deque(maxlen=record_window) if record_tokens else None
         start_offset = 0
         pattern = self.pattern_provider.get_pattern(max_gen_len)
         unknown_token = -1
@@ -264,6 +265,7 @@ class LmModel(StreamingModule):
             prev_offset = 0
             for offset in tqdm(range(start_offset_sequence, gen_sequence_len)):
                 curr_sequence = mx.array(gen_sequence_np[..., prev_offset:offset], dtype=mx.int32)
+                sampled_pool = list(record_token_pool) if record_tokens else None
                 next_token = self._sample_next_token(
                     curr_sequence,
                     condition_tensors,
@@ -272,7 +274,7 @@ class LmModel(StreamingModule):
                     top_k,
                     top_p,
                     cfg_coef=cfg_coef,
-                    sampled_token_pool=record_token_pool[-record_window:] if record_tokens else None,
+                    sampled_token_pool=sampled_pool,
                     ignore_tokens=ignore_tokens,
                 )
                 next_token_np = np.array(next_token)
