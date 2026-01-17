@@ -1,0 +1,16 @@
+mlx
+numpy
+omegaconf
+transformers
+tqdm
+librosa
+soundfile
+safetensors
+onnxruntime
+coremltools
+fastapi
+uvicorn
+python-multipart
+aiofiles
+huggingface-hub
+requests
