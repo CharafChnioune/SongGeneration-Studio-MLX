@@ -184,22 +184,22 @@ def _sentence_target(section_type: str, length: str) -> tuple[int, int]:
     base = section_type.split("-", 1)[0]
     if length == "short":
         if base == "chorus":
-            return 4, 5
+            return 4, 6
         if base == "bridge":
-            return 3, 4
-        return 5, 6
+            return 4, 5
+        return 6, 7
     if length == "full":
         if base == "chorus":
-            return 6, 8
+            return 8, 10
         if base == "bridge":
-            return 5, 6
-        return 8, 10
+            return 6, 8
+        return 10, 12
     # medium
     if base == "chorus":
-        return 5, 6
+        return 6, 8
     if base == "bridge":
-        return 4, 5
-    return 6, 8
+        return 5, 6
+    return 8, 10
 
 
 def _build_section_prompt(section_type: str, length: str) -> str:
@@ -212,6 +212,32 @@ def _build_section_prompt(section_type: str, length: str) -> str:
     else:
         extra = "Tell the story with vivid imagery and forward momentum."
     return f"Write {low}-{high} sentences. {extra}"
+
+
+_RAP_GENRE_HINTS = ("hip hop", "rap", "trap", "drill", "boom bap", "gangsta", "grime")
+
+
+def _is_rap_like(genre: str, prompt: str) -> bool:
+    haystack = f"{genre} {prompt}".lower()
+    return any(tag in haystack for tag in _RAP_GENRE_HINTS)
+
+
+def _lyric_craft_guidance(rap_like: bool, section_type: str) -> str:
+    base = section_type.split("-", 1)[0]
+    if rap_like:
+        hook = "Keep the hook memorable and easy to chant." if base == "chorus" else ""
+        return (
+            "Lyric craft: dense wordplay, vivid metaphors, internal rhyme, and multisyllabic end rhyme. "
+            "Use assonance, consonance, and alliteration without filler. "
+            "Aim for punchy cadence shifts and double meanings. "
+            f"{hook}".strip()
+        )
+    hook = "Keep the hook simple and memorable with a repeating phrase." if base == "chorus" else ""
+    return (
+        "Lyric craft: fresh metaphors, sensory detail, and emotional specificity. "
+        "Avoid cliches and filler. Keep phrasing singable and coherent. "
+        f"{hook}".strip()
+    )
 
 
 def _count_sentences(text: str) -> int:
@@ -240,6 +266,7 @@ def _selection_context(
         f"Language: {language}",
         f"Length: {length}",
         "Goal: chart-ready hit song with rich imagery and a memorable hook.",
+        "Quality bar: metaphor-rich, no filler, strong internal logic and progression.",
         "Only use verse/chorus/bridge sections. Skip intro/outro/inst sections (they are instrumental).",
     ]
     if genre:
@@ -315,13 +342,15 @@ def _generate_section_lyrics(
         ", ".join(instruments) if instruments else "",
         f"the bpm is {bpm}",
     ]))
+    rap_like = _is_rap_like(genre, prompt)
     section_prompt = (
         f"Write lyrics for {section_type} {idx}.\n"
         f"Style tags: {style_line}\n"
         f"Structure: {' | '.join(structure)}\n"
         f"Previous lyrics: {' '.join(lyric_context[-3:]) if lyric_context else 'None'}\n"
         f"{_build_section_prompt(section_type, length)}\n"
-        "Avoid mentioning instruments or production. Avoid repeating the prompt verbatim.\n"
+        f"{_lyric_craft_guidance(rap_like, section_type)}\n"
+        "Avoid mentioning instruments or production unless the theme explicitly asks for it. Avoid repeating the prompt verbatim.\n"
         "Continue the song naturally after the lyrics so far. Do not repeat previous lines.\n"
         "Use complete sentences separated by periods. Do not add section labels.\n"
         "JSON: {\"lyrics\": \"Sentence one. Sentence two.\"}"
@@ -388,6 +417,7 @@ def _edit_section_lyrics(
     current_lyrics: str,
 ) -> str:
     min_sentences, _ = _sentence_target(section_type, length)
+    rap_like = _is_rap_like(genre, prompt)
     base_prompt = (
         f"Rewrite the lyrics for {section_type} {idx}.\n"
         f"Instruction: {instruction}\n"
@@ -395,7 +425,8 @@ def _edit_section_lyrics(
         f"Structure: {' | '.join(structure)}\n"
         f"Previous lyrics: {' '.join(lyric_context[-3:]) if lyric_context else 'None'}\n"
         f"{_build_section_prompt(section_type, length)}\n"
-        "Avoid mentioning instruments or production. Keep it cohesive with the song so far.\n"
+        f"{_lyric_craft_guidance(rap_like, section_type)}\n"
+        "Avoid mentioning instruments or production unless the theme explicitly asks for it. Keep it cohesive with the song so far.\n"
         "Use complete sentences separated by periods. Do not add section labels.\n"
         "JSON: {\"lyrics\": \"<rewritten lyrics>\"}"
     )
