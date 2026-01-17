@@ -6,6 +6,7 @@ Apple Silicon aware GPU/VRAM detection utilities.
 import os
 import subprocess
 import sys
+import shutil
 from typing import Optional
 from pathlib import Path
 
@@ -58,6 +59,15 @@ def get_gpu_info() -> dict:
             'recommended_mode': recommended,
             'can_run_full': (total_gb or 0) >= 24,
             'can_run_low': (total_gb or 0) >= 10,
+        }
+
+    if shutil.which("nvidia-smi") is None:
+        return {
+            'available': False,
+            'gpu': None,
+            'recommended_mode': 'low',
+            'can_run_full': False,
+            'can_run_low': False,
         }
 
     try:

@@ -5,6 +5,9 @@ import json
 import os
 import time
 import random
+import subprocess
+import sys
+from pathlib import Path
 from typing import Optional
 
 os.environ.setdefault("TRANSFORMERS_NO_TORCH", "1")
@@ -177,6 +180,24 @@ def load_auto_prompts(path: str) -> dict[str, np.ndarray]:
     return prompts
 
 
+def ensure_runtime_assets(base_dir: Path, needs_separator: bool) -> None:
+    required = [
+        base_dir / "ckpt" / "vae" / "stable_audio_1920_vae.json",
+        base_dir / "ckpt" / "vae" / "autoencoder_music_1320k.npz",
+    ]
+    if needs_separator:
+        required.append(base_dir / "third_party" / "demucs" / "ckpt" / "htdemucs.onnx")
+    missing = [path for path in required if not path.exists()]
+    if not missing:
+        return
+    script = base_dir / "tools" / "fetch_runtime.py"
+    if not script.exists():
+        missing_list = ", ".join(str(path) for path in missing)
+        raise FileNotFoundError(f"Missing runtime assets ({missing_list}) and fetch_runtime.py not found")
+    print("[RUNTIME] Missing assets, downloading runtime bundle...")
+    subprocess.check_call([sys.executable, str(script), "--local-dir", str(base_dir)])
+
+
 def main():
     args = parse_args()
     if args.seed is not None:
@@ -211,6 +232,9 @@ def main():
         and not (("prompt_vocal_path" in item) or ("prompt_bgm_path" in item))
         for item in new_items
     )
+
+    if needs_audio_tokenizer or (needs_separator and args.separator_backend != "none"):
+        ensure_runtime_assets(Path(__file__).resolve().parent, needs_separator and args.separator_backend != "none")
 
     lm = builders.get_lm_model(cfg)
     load_weights_npz(lm, args.weights)
