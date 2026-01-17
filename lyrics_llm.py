@@ -173,6 +173,13 @@ def _extract_json(text: str) -> Dict[str, Any]:
     raise ValueError("No JSON object found in LLM response")
 
 
+def _extract_json_safe(text: str) -> Dict[str, Any] | None:
+    try:
+        return _extract_json(text)
+    except Exception:
+        return None
+
+
 def _normalize_lines(value: Any) -> List[str]:
     if value is None:
         return []
@@ -182,6 +189,140 @@ def _normalize_lines(value: Any) -> List[str]:
         return [line.strip() for line in value.splitlines() if line.strip()]
     return [str(value).strip()] if str(value).strip() else []
 
+
+def _section_base(section_type: str) -> str:
+    label = (section_type or "").strip().lower()
+    if label.startswith("intro"):
+        return "intro"
+    if label.startswith("outro"):
+        return "outro"
+    if label.startswith("prechorus") or label.startswith("pre-chorus"):
+        return "prechorus"
+    if label.startswith("chorus"):
+        return "chorus"
+    if label.startswith("verse"):
+        return "verse"
+    if label.startswith("bridge"):
+        return "bridge"
+    return "default"
+
+
+def _target_range_for_section(req: LyricsRequest, section_type: str) -> tuple[int, int]:
+    targets = _line_targets_for(req)
+    base = _section_base(section_type)
+    return targets.get(base, targets["default"])
+
+
+def _format_previous_sections(prev: List[Dict[str, Any]], limit: int = 1600) -> str:
+    if not prev:
+        return ""
+    payload = list(prev)
+    text = json.dumps(payload, ensure_ascii=False)
+    while len(text) > limit and len(payload) > 1:
+        payload.pop(0)
+        text = json.dumps(payload, ensure_ascii=False)
+    return text[:limit]
+
+
+def _build_section_messages(
+    req: LyricsRequest,
+    section: LyricsSection,
+    min_lines: int,
+    max_lines: int,
+    previous_sections: List[Dict[str, Any]],
+    existing_lines: List[str],
+) -> List[Dict[str, str]]:
+    instructions = [
+        "You are a professional songwriter.",
+        "Return ONLY valid JSON.",
+        "Schema: {\"lines\":[\"line1\",\"line2\"]}.",
+        "Write lines ONLY for the CURRENT_SECTION.",
+        "Keep lines short and natural.",
+        "Prefer the upper end of the target line count.",
+        "If this section type repeats (e.g., chorus), keep the hook consistent.",
+        "Use ASCII punctuation only.",
+    ]
+    user_parts = [
+        f"CURRENT_SECTION: {section.type}",
+        f"LINE_TARGET: {min_lines}-{max_lines} lines",
+    ]
+    if req.language:
+        user_parts.append(f"LANGUAGE: {req.language}")
+    if req.style:
+        user_parts.append(f"STYLE: {req.style}")
+    if req.seed_words:
+        user_parts.append(f"SEED_WORDS: {req.seed_words}")
+    prev_text = _format_previous_sections(previous_sections)
+    if prev_text:
+        user_parts.append("PREVIOUS_SECTIONS_JSON:")
+        user_parts.append(prev_text)
+    if existing_lines:
+        user_parts.append("EXISTING_LINES:")
+        user_parts.append(json.dumps(existing_lines, ensure_ascii=False))
+        user_parts.append("MODE: refine and expand existing lines to reach target length.")
+    else:
+        user_parts.append("MODE: generate new lines.")
+
+    return [
+        {"role": "system", "content": " ".join(instructions)},
+        {"role": "user", "content": "\n".join(user_parts)},
+    ]
+
+
+def _build_expand_messages(
+    req: LyricsRequest,
+    section: LyricsSection,
+    min_lines: int,
+    max_lines: int,
+    previous_sections: List[Dict[str, Any]],
+    existing_lines: List[str],
+) -> List[Dict[str, str]]:
+    instructions = [
+        "You are a professional songwriter.",
+        "Return ONLY valid JSON.",
+        "Schema: {\"lines\":[\"line1\",\"line2\"]}.",
+        "Expand the EXISTING_LINES to reach the target line count.",
+        "Keep the same tone and story.",
+        "Use ASCII punctuation only.",
+    ]
+    user_parts = [
+        f"CURRENT_SECTION: {section.type}",
+        f"LINE_TARGET: {min_lines}-{max_lines} lines",
+        "EXISTING_LINES:",
+        json.dumps(existing_lines, ensure_ascii=False),
+    ]
+    if req.language:
+        user_parts.append(f"LANGUAGE: {req.language}")
+    if req.style:
+        user_parts.append(f"STYLE: {req.style}")
+    if req.seed_words:
+        user_parts.append(f"SEED_WORDS: {req.seed_words}")
+    prev_text = _format_previous_sections(previous_sections)
+    if prev_text:
+        user_parts.append("PREVIOUS_SECTIONS_JSON:")
+        user_parts.append(prev_text)
+
+    return [
+        {"role": "system", "content": " ".join(instructions)},
+        {"role": "user", "content": "\n".join(user_parts)},
+    ]
+
+
+def _parse_section_lines(raw_text: str) -> List[str]:
+    parsed = _extract_json_safe(raw_text)
+    if parsed:
+        return _normalize_lines(parsed.get("lines") or parsed.get("lyrics") or parsed.get("text"))
+    cleaned = re.sub(r"^```(?:json)?", "", raw_text, flags=re.IGNORECASE).strip()
+    cleaned = re.sub(r"```$", "", cleaned).strip()
+    return _normalize_lines(cleaned)
+
+
+def _pad_lines(lines: List[str], min_lines: int) -> List[str]:
+    if not lines:
+        return lines
+    while len(lines) < min_lines:
+        lines.append(lines[-1])
+    return lines
 
 def _parse_response(req: LyricsRequest, raw_text: str) -> List[LyricsSection]:
     parsed = _extract_json(raw_text)
@@ -243,6 +384,12 @@ def _call_ollama(req: LyricsRequest, messages: List[Dict[str, str]]) -> str:
     return data["message"]["content"]
 
 
+def _call_provider(provider: str, req: LyricsRequest, messages: List[Dict[str, str]]) -> str:
+    if provider == "ollama":
+        return _call_ollama(req, messages)
+    return _call_lmstudio(req, messages)
+
+
 def generate_lyrics(req: LyricsRequest) -> Dict[str, Any]:
     if not req.model:
         raise ValueError("model is required")
@@ -250,30 +397,55 @@ def generate_lyrics(req: LyricsRequest) -> Dict[str, Any]:
     if provider not in ("lmstudio", "ollama"):
         raise ValueError("provider must be 'lmstudio' or 'ollama'")
 
-    messages = _build_messages(req)
-    if provider == "ollama":
-        raw_text = _call_ollama(req, messages)
-    else:
-        raw_text = _call_lmstudio(req, messages)
+    output_sections: List[LyricsSection] = []
+    previous_sections: List[Dict[str, Any]] = []
+    raw_chunks: List[Dict[str, Any]] = []
 
-    sections = _parse_response(req, raw_text)
-    missing = _find_missing_sections(sections)
-    retry_text = ""
-    if missing:
-        missing_sections = [req.sections[idx] for idx in missing]
-        retry_req = _clone_request(req, sections=missing_sections, mode="generate")
-        retry_messages = _build_messages(retry_req)
-        if provider == "ollama":
-            retry_text = _call_ollama(retry_req, retry_messages)
-        else:
-            retry_text = _call_lmstudio(retry_req, retry_messages)
-        fill_sections = _parse_response(retry_req, retry_text)
-        sections = _fill_missing_sections(sections, missing, fill_sections)
+    for sec in req.sections:
+        if not sec.has_lyrics:
+            output_sections.append(LyricsSection(type=sec.type, has_lyrics=False, lyrics=""))
+            previous_sections.append({"type": sec.type, "lines": []})
+            continue
+
+        min_lines, max_lines = _target_range_for_section(req, sec.type)
+        existing_lines = _normalize_lines(sec.lyrics)
+        messages = _build_section_messages(
+            req, sec, min_lines, max_lines, previous_sections, existing_lines
+        )
+        raw_text = _call_provider(provider, req, messages)
+        lines = _parse_section_lines(raw_text)
+
+        expanded_text = ""
+        if len(lines) < min_lines:
+            expand_messages = _build_expand_messages(
+                req, sec, min_lines, max_lines, previous_sections, lines or existing_lines
+            )
+            expanded_text = _call_provider(provider, req, expand_messages)
+            expanded_lines = _parse_section_lines(expanded_text)
+            if expanded_lines:
+                lines = expanded_lines
+
+        if not lines and existing_lines:
+            lines = existing_lines
+
+        if len(lines) > max_lines:
+            lines = lines[:max_lines]
+        if len(lines) < min_lines:
+            lines = _pad_lines(lines, min_lines)
+
+        lyrics = "\n".join(lines)
+        output_sections.append(LyricsSection(type=sec.type, has_lyrics=True, lyrics=lyrics))
+        previous_sections.append({"type": sec.type, "lines": lines})
+        raw_chunks.append({
+            "type": sec.type,
+            "raw": raw_text,
+            "raw_expand": expanded_text,
+        })
 
     return {
-        "sections": [s.model_dump() for s in sections],
-        "raw_text": raw_text,
-        "raw_text_retry": retry_text,
+        "sections": [s.model_dump() for s in output_sections],
+        "raw_text": json.dumps(raw_chunks, ensure_ascii=False),
+        "raw_text_retry": "",
     }
 
 
