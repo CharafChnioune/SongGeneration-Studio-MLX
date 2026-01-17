@@ -21,10 +21,31 @@ DEFAULT_PATTERNS = (
 SKIP_SUFFIXES = {".ckpt"}
 
 
+def _pattern_base(pattern: str) -> Path:
+    wildcard_pos = min(
+        (idx for idx in (pattern.find("*"), pattern.find("?"), pattern.find("[")) if idx != -1),
+        default=-1,
+    )
+    if wildcard_pos == -1:
+        base = pattern
+    else:
+        base = pattern[:wildcard_pos]
+    return Path(base).parent if base.endswith("/") else Path(base)
+
+
 def _iter_files(root: Path, patterns: Iterable[str]) -> list[Path]:
     files: dict[Path, None] = {}
     for pattern in patterns:
-        for path in root.glob(pattern):
+        base = _pattern_base(pattern)
+        candidate = (root / base).resolve()
+        if candidate.exists():
+            if candidate.is_file():
+                paths = [candidate]
+            else:
+                paths = list(candidate.rglob("*"))
+        else:
+            paths = list(root.glob(pattern))
+        for path in paths:
             if not path.is_file():
                 continue
             if path.suffix in SKIP_SUFFIXES:
@@ -65,7 +86,9 @@ def main() -> int:
     root = Path(args.root).resolve()
     files = _iter_files(root, args.pattern)
     if not files:
-        print("No files matched. Check --root and --pattern.")
+        print("No files matched.")
+        print(f"Root: {root}")
+        print(f"Patterns: {args.pattern}")
         return 1
 
     total_bytes = _bytes_total(files)
