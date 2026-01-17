@@ -57,11 +57,6 @@ restore_library()
 
 ready_models = get_available_models_sync()
 print(f"[CONFIG] Available models: {[m['id'] for m in ready_models]}")
-if not ready_models:
-    recommended = get_recommended_model()
-    print(f"[CONFIG] No models downloaded. Recommended: {recommended}")
-    start_model_download(recommended, notify_models_update_sync)
-    print(f"[CONFIG] Auto-download started for: {recommended}")
 
 # ============================================================================
 # Helper Wrappers for SSE Notifications

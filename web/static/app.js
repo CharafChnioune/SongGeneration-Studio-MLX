@@ -169,7 +169,7 @@ var App = () => {
 
     // Load initial data
     useEffect(() => {
-        modelState.loadModels(true);
+        modelState.loadModels();
         loadLibrary();
         loadGpuInfo();
         loadQueue();
@@ -1073,7 +1073,7 @@ var App = () => {
                                         justifyContent: 'center',
                                         gap: '8px'
                                     }}>
-                                        {modelState.isInitializing || modelState.autoDownloadStarting ? <><SpinnerIcon size={14} /> Loading...</> : modelState.allModels.some(m => m.status === 'downloading') ? 'Downloading model...' : 'No Models Downloaded'}
+                                        {modelState.isInitializing ? <><SpinnerIcon size={14} /> Loading...</> : modelState.allModels.some(m => m.status === 'downloading') ? 'Downloading model...' : 'No Models Downloaded'}
                                     </div>
                                 )}
                                 {modelState.allModels.filter(m => m.status === 'downloading').map(m => {

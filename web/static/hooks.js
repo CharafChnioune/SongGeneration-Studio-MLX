@@ -94,10 +94,7 @@ var useModels = () => {
     const [recommendedModel, setRecommendedModel] = useState(null);
     const [isInitializing, setIsInitializing] = useState(true);
     const [downloadPolling, setDownloadPolling] = useState(false);
-    const [autoDownloadStarting, setAutoDownloadStarting] = useState(false);
-    const autoDownloadTriggeredRef = useRef(false);
-
-    const loadModels = useCallback(async (triggerAutoDownload = false) => {
+    const loadModels = useCallback(async () => {
         try {
             const r = await fetch('/api/models');
             if (!r.ok) throw new Error(`Failed to load models: ${r.status}`);
@@ -114,24 +111,6 @@ var useModels = () => {
 
             const hasDownloading = all.some(m => m.status === 'downloading');
             setDownloadPolling(hasDownloading);
-
-            // Auto-download recommended model on first launch
-            if (triggerAutoDownload && !d.has_ready_model && d.recommended && 
-                !autoDownloadTriggeredRef.current && !hasDownloading) {
-                autoDownloadTriggeredRef.current = true;
-                setAutoDownloadStarting(true);
-                try {
-                    const downloadRes = await fetch(`/api/models/${d.recommended}/download`, { method: 'POST' });
-                    if (downloadRes.ok) {
-                        setDownloadPolling(true);
-                        loadModels();
-                    }
-                } catch (e) {
-                    console.error('[AUTO-DOWNLOAD] Error:', e);
-                    autoDownloadTriggeredRef.current = false;
-                }
-                setAutoDownloadStarting(false);
-            }
             setIsInitializing(false);
         } catch (e) {
             console.error('[MODELS] Error:', e);
@@ -181,7 +160,7 @@ var useModels = () => {
     return {
         models, allModels, selectedModel, setSelectedModel,
         hasReadyModel, recommendedModel, isInitializing,
-        downloadPolling, autoDownloadStarting,
+        downloadPolling,
         loadModels, startDownload, cancelDownload, deleteModel: deleteModelHandler,
         setAllModels, setModels, setHasReadyModel, setDownloadPolling,
     };
@@ -384,4 +363,3 @@ var useTimeEstimation = (timingStats) => {
         return Math.max(60, defaultEstimate);
     }, [timingStats]);
 };
-
