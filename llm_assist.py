@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import random
 import re
+import ast
 from typing import Any, Dict, List, Optional
 
 import requests
@@ -78,14 +79,25 @@ def _call_chat(provider: str, base_url: str, model: str, messages: List[Dict[str
 def _extract_json(text: str) -> Dict[str, Any]:
     if not text:
         raise ValueError("Empty LLM response.")
-    text = text.strip()
-    if text.startswith("{") and text.endswith("}"):
-        return json.loads(text)
-    start = text.find("{")
-    end = text.rfind("}")
-    if start == -1 or end == -1 or end <= start:
-        raise ValueError("No JSON object found in LLM response.")
-    return json.loads(text[start:end + 1])
+    cleaned = text.strip()
+    cleaned = re.sub(r"^```(?:json)?|```$", "", cleaned, flags=re.IGNORECASE | re.MULTILINE).strip()
+    candidate = cleaned
+    if not (candidate.startswith("{") and candidate.endswith("}")):
+        start = cleaned.find("{")
+        end = cleaned.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            candidate = cleaned[start:end + 1]
+    try:
+        return json.loads(candidate)
+    except Exception:
+        pass
+    try:
+        value = ast.literal_eval(candidate)
+        if isinstance(value, dict):
+            return value
+    except Exception:
+        pass
+    raise ValueError("No JSON object found in LLM response.")
 
 
 def _coerce_tag(value: Any, allowed: set[str], fallback: Optional[str] = None) -> str:
@@ -181,53 +193,76 @@ def generate_ai_assist(request: Dict[str, Any]) -> Dict[str, Any]:
         "Use only the provided tags when possible."
     )
 
-    def ask_json(task: str, guidance: str, temperature: float = 0.7, max_tokens: int = 180) -> Dict[str, Any]:
+    def ask_json(task: str, guidance: str, context: str, temperature: float = 0.7, max_tokens: int = 180) -> Dict[str, Any]:
+        strict = "Return ONLY a JSON object. No extra text, no markdown, no code fences."
         messages = [
-            {"role": "system", "content": "Return ONLY a JSON object. No extra text."},
-            {"role": "user", "content": f"{base_context}\nTask: {task}\n{guidance}"},
+            {"role": "system", "content": strict},
+            {"role": "user", "content": f"{context}\nTask: {task}\n{guidance}"},
         ]
-        content = _call_chat(provider, base_url, model, messages, temperature, max_tokens)
-        return _extract_json(content)
+        for attempt in range(2):
+            content = _call_chat(provider, base_url, model, messages, temperature, max_tokens)
+            try:
+                return _extract_json(content)
+            except Exception:
+                if attempt == 0:
+                    messages = [
+                        {"role": "system", "content": strict},
+                        {"role": "user", "content": f"{context}\nTask: {task}\n{guidance}\nReturn ONLY JSON. If unsure, return an empty JSON object."},
+                    ]
+                    continue
+                return {}
+        return {}
 
     # Step 1: genre
     genre_json = ask_json(
         "Pick one genre tag.",
         f"Allowed genre tags: {', '.join(allowed_genres)}\nJSON: {{\"genre\": \"<tag>\"}}",
+        base_context,
     )
     genre = _coerce_tag(genre_json.get("genre"), _TAG_GENRES)
 
     # Step 2: mood / emotion
+    mood_context = f"{base_context}\nSelected genre: {genre}"
     mood_json = ask_json(
         "Pick 1-2 mood/emotion tags that fit the genre and theme.",
         f"Allowed mood tags: {', '.join(allowed_emotions)}\nJSON: {{\"emotion\": [\"<tag>\"]}}",
+        mood_context,
     )
     emotion = _coerce_tags(mood_json.get("emotion"), _TAG_EMOTIONS, max_items=2)
 
     # Step 3: timbre
+    timbre_context = f"{base_context}\nSelected genre: {genre}\nSelected mood: {', '.join(emotion) if emotion else 'none'}"
     timbre_json = ask_json(
         "Pick 1-2 timbre tags that match the mood and genre.",
         f"Allowed timbre tags: {', '.join(allowed_timbres)}\nJSON: {{\"timbre\": [\"<tag>\"]}}",
+        timbre_context,
     )
     timbre = _coerce_tags(timbre_json.get("timbre"), _TAG_TIMBRES, max_items=2)
 
     # Step 4: instruments
+    inst_context = f"{base_context}\nSelected genre: {genre}\nSelected mood: {', '.join(emotion) if emotion else 'none'}"
     inst_json = ask_json(
         "Pick 1-2 instrument tags that match the genre.",
         f"Allowed instrument tags: {', '.join(allowed_instruments)}\nJSON: {{\"instruments\": [\"<tag>\"]}}",
+        inst_context,
     )
     instruments = _coerce_tags(inst_json.get("instruments"), _TAG_INSTRUMENTS, max_items=2)
 
     # Step 5: bpm
+    bpm_context = f"{base_context}\nSelected genre: {genre}\nSelected mood: {', '.join(emotion) if emotion else 'none'}"
     bpm_json = ask_json(
         "Pick a BPM (60-180) that fits the genre and mood.",
         "JSON: {\"bpm\": 94}",
+        bpm_context,
     )
     bpm = _coerce_bpm(bpm_json.get("bpm"), fallback=94)
 
     # Step 6: gender
+    gender_context = f"{base_context}\nSelected genre: {genre}\nSelected mood: {', '.join(emotion) if emotion else 'none'}"
     gender_json = ask_json(
         "Pick a vocal gender (male or female) that fits the theme.",
         "JSON: {\"gender\": \"female\"}",
+        gender_context,
     )
     gender = _coerce_gender(gender_json.get("gender"))
 
@@ -239,7 +274,8 @@ def generate_ai_assist(request: Dict[str, Any]) -> Dict[str, Any]:
         "JSON: {\"structure\": [\"intro-medium\", \"verse\", \"chorus\", \"verse\", \"chorus\", \"outro-medium\"]}"
     )
     try:
-        structure_json = ask_json("Create a song structure.", structure_guidance, temperature=0.5, max_tokens=200)
+        structure_context = f"{base_context}\nSelected genre: {genre}\nSelected mood: {', '.join(emotion) if emotion else 'none'}"
+        structure_json = ask_json("Create a song structure.", structure_guidance, structure_context, temperature=0.5, max_tokens=200)
         structure_raw = structure_json.get("structure", [])
         if not isinstance(structure_raw, list):
             structure_raw = []
@@ -277,7 +313,13 @@ def generate_ai_assist(request: Dict[str, Any]) -> Dict[str, Any]:
             "Use complete sentences separated by periods. Do not add section labels.\n"
             "JSON: {\"lyrics\": \"Sentence one. Sentence two.\"}"
         )
-        lyric_json = ask_json("Write section lyrics.", section_prompt, temperature=0.8, max_tokens=320)
+        lyric_context_text = (
+            f"{base_context}\nSelected genre: {genre}\nSelected mood: {', '.join(emotion) if emotion else 'none'}\n"
+            f"Selected timbre: {', '.join(timbre) if timbre else 'none'}\n"
+            f"Selected instruments: {', '.join(instruments) if instruments else 'none'}\n"
+            f"BPM: {bpm}\nGender: {gender}"
+        )
+        lyric_json = ask_json("Write section lyrics.", section_prompt, lyric_context_text, temperature=0.8, max_tokens=320)
         lyrics_text = str(lyric_json.get("lyrics", "")).strip()
         lyric_context.append(lyrics_text)
         sections.append({"type": section_type, "lyrics": lyrics_text})
