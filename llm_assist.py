@@ -94,6 +94,52 @@ def _extract_json(text: str) -> Dict[str, Any]:
     raise ValueError("No JSON object found in LLM response.")
 
 
+def _unescape_json_string(value: str) -> str:
+    if value is None:
+        return ""
+    try:
+        return json.loads(f"\"{value}\"")
+    except Exception:
+        return (
+            value.replace("\\n", "\n")
+            .replace("\\t", "\t")
+            .replace("\\\"", "\"")
+            .replace("\\\\", "\\")
+        )
+
+
+def _scan_quoted_value(text: str, start: int, quote: str) -> str:
+    buf: List[str] = []
+    escaped = False
+    for idx in range(start, len(text)):
+        char = text[idx]
+        if escaped:
+            buf.append(char)
+            escaped = False
+            continue
+        if char == "\\":
+            escaped = True
+            continue
+        if char == quote:
+            return "".join(buf)
+        buf.append(char)
+    return "".join(buf)
+
+
+def _recover_json_value(text: str, key: str) -> str:
+    if not text:
+        return ""
+    cleaned = text.strip()
+    cleaned = re.sub(r"^```(?:json)?|```$", "", cleaned, flags=re.IGNORECASE | re.MULTILINE).strip()
+    pattern = re.compile(rf"[\"']{re.escape(key)}[\"']\s*:\s*[\"']")
+    match = pattern.search(cleaned)
+    if match:
+        quote = cleaned[match.end() - 1]
+        raw_value = _scan_quoted_value(cleaned, match.end(), quote)
+        return _unescape_json_string(raw_value).strip()
+    return ""
+
+
 def _ask_json(
     provider: str,
     base_url: str,
@@ -103,6 +149,8 @@ def _ask_json(
     guidance: str,
     temperature: float = 0.7,
     max_tokens: int = 180,
+    expected_key: Optional[str] = None,
+    allow_plain: bool = False,
 ) -> Dict[str, Any]:
     strict = "Return ONLY a JSON object. No extra text, no markdown, no code fences."
     system_prompt = f"{strict}\nContext:\n{context}"
@@ -115,10 +163,24 @@ def _ask_json(
         try:
             return _extract_json(content)
         except Exception:
+            if expected_key:
+                recovered = _recover_json_value(content, expected_key)
+                if recovered:
+                    return {expected_key: recovered}
+                if allow_plain:
+                    cleaned = (content or "").strip()
+                    if cleaned and not cleaned.lstrip().startswith("{"):
+                        return {expected_key: cleaned}
             if attempt == 0:
+                fallback_suffix = "Return ONLY JSON."
+                if expected_key:
+                    fallback_suffix = (
+                        f"Return ONLY JSON with the key \"{expected_key}\". "
+                        f"If unsure, return {{\"{expected_key}\": \"\"}}."
+                    )
                 messages = [
                     {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": f"Task: {task}\n{guidance}\nReturn ONLY JSON. If unsure, return an empty JSON object."},
+                    {"role": "user", "content": f"Task: {task}\n{guidance}\n{fallback_suffix}"},
                 ]
                 continue
             return {}
@@ -368,7 +430,18 @@ def _generate_section_lyrics(
         structure=structure,
         lyrics=lyric_context,
     ) + f"\nSection: {section_type}"
-    lyric_json = _ask_json(provider, base_url, model, lyric_context_text, "Write section lyrics.", section_prompt, temperature=0.8, max_tokens=450)
+    lyric_json = _ask_json(
+        provider,
+        base_url,
+        model,
+        lyric_context_text,
+        "Write section lyrics.",
+        section_prompt,
+        temperature=0.8,
+        max_tokens=700,
+        expected_key="lyrics",
+        allow_plain=True,
+    )
     lyrics_text = str(lyric_json.get("lyrics", "")).strip()
     min_sentences, _ = _sentence_target(section_type, length)
     if _count_sentences(lyrics_text) < min_sentences or len(lyrics_text) < 120:
@@ -378,7 +451,18 @@ def _generate_section_lyrics(
             "Append new sentences at the end. Keep the same theme and voice.\n"
             "JSON: {\"lyrics\": \"<expanded full lyrics>\"}"
         )
-        lyric_json = _ask_json(provider, base_url, model, lyric_context_text, "Expand section lyrics.", expand_prompt, temperature=0.85, max_tokens=600)
+        lyric_json = _ask_json(
+            provider,
+            base_url,
+            model,
+            lyric_context_text,
+            "Expand section lyrics.",
+            expand_prompt,
+            temperature=0.85,
+            max_tokens=850,
+            expected_key="lyrics",
+            allow_plain=True,
+        )
         lyrics_text = str(lyric_json.get("lyrics", "")).strip()
     if _count_sentences(lyrics_text) < min_sentences or len(lyrics_text) < 120:
         expand_prompt = (
@@ -387,7 +471,18 @@ def _generate_section_lyrics(
             "Return the full expanded lyrics.\n"
             "JSON: {\"lyrics\": \"<expanded full lyrics>\"}"
         )
-        lyric_json = _ask_json(provider, base_url, model, lyric_context_text, "Expand section lyrics.", expand_prompt, temperature=0.9, max_tokens=700)
+        lyric_json = _ask_json(
+            provider,
+            base_url,
+            model,
+            lyric_context_text,
+            "Expand section lyrics.",
+            expand_prompt,
+            temperature=0.9,
+            max_tokens=900,
+            expected_key="lyrics",
+            allow_plain=True,
+        )
         lyrics_text = str(lyric_json.get("lyrics", "")).strip()
     if _count_sentences(lyrics_text) < min_sentences:
         seed = prompt or "We rise tonight"
@@ -443,7 +538,18 @@ def _edit_section_lyrics(
         structure=structure,
         lyrics=lyric_context,
     ) + f"\nSection: {section_type}"
-    lyric_json = _ask_json(provider, base_url, model, context, "Rewrite section lyrics.", base_prompt, temperature=0.8, max_tokens=500)
+    lyric_json = _ask_json(
+        provider,
+        base_url,
+        model,
+        context,
+        "Rewrite section lyrics.",
+        base_prompt,
+        temperature=0.8,
+        max_tokens=700,
+        expected_key="lyrics",
+        allow_plain=True,
+    )
     lyrics_text = str(lyric_json.get("lyrics", "")).strip()
     if _count_sentences(lyrics_text) < min_sentences or len(lyrics_text) < 120:
         expand_prompt = (
@@ -452,7 +558,38 @@ def _edit_section_lyrics(
             "Return the full expanded lyrics.\n"
             "JSON: {\"lyrics\": \"<expanded full lyrics>\"}"
         )
-        lyric_json = _ask_json(provider, base_url, model, context, "Expand section rewrite.", expand_prompt, temperature=0.85, max_tokens=650)
+        lyric_json = _ask_json(
+            provider,
+            base_url,
+            model,
+            context,
+            "Expand section rewrite.",
+            expand_prompt,
+            temperature=0.85,
+            max_tokens=850,
+            expected_key="lyrics",
+            allow_plain=True,
+        )
+        lyrics_text = str(lyric_json.get("lyrics", "")).strip()
+    if current_lyrics and lyrics_text.strip() == current_lyrics.strip():
+        remix_prompt = (
+            f"Rewrite this section with clearly different imagery, cadence, and word choice.\n"
+            f"Current lyrics: {current_lyrics}\n"
+            f"Ensure at least {min_sentences} sentences.\n"
+            "JSON: {\"lyrics\": \"<new lyrics>\"}"
+        )
+        lyric_json = _ask_json(
+            provider,
+            base_url,
+            model,
+            context,
+            "Make a distinct rewrite.",
+            remix_prompt,
+            temperature=0.9,
+            max_tokens=850,
+            expected_key="lyrics",
+            allow_plain=True,
+        )
         lyrics_text = str(lyric_json.get("lyrics", "")).strip()
     if _count_sentences(lyrics_text) < min_sentences:
         seed = prompt or "We rise tonight"
