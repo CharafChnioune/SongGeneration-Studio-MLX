@@ -49,3 +49,16 @@ class AIAssistRequest(BaseModel):
     prompt: str
     language: str = "English"
     length: str = "medium"
+
+
+class AIAssistStepRequest(BaseModel):
+    provider: str = "lmstudio"
+    base_url: Optional[str] = None
+    model: str
+    prompt: str
+    language: str = "English"
+    length: str = "medium"
+    step: str
+    state: Optional[dict] = None
+    section_index: Optional[int] = None
+    instruction: Optional[str] = None

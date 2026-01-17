@@ -32,6 +32,7 @@ from schemas import (
     SongRequest,
     UpdateGenerationRequest,
     AIAssistRequest,
+    AIAssistStepRequest,
 )
 from timing import get_timing_stats
 from models import (
@@ -49,7 +50,7 @@ from generation import (
     generations, generation_lock, is_generation_active, get_active_generation_id,
     restore_library, run_generation
 )
-from llm_assist import generate_ai_assist
+from llm_assist import generate_ai_assist, generate_ai_assist_step
 
 # ============================================================================
 # Startup Initialization
@@ -429,6 +430,15 @@ async def ai_assist(request: AIAssistRequest):
         return result
     except Exception as e:
         raise HTTPException(400, f"AI assist failed: {e}")
+
+
+@app.post("/api/ai/assist-step")
+async def ai_assist_step(request: AIAssistStepRequest):
+    try:
+        result = await asyncio.to_thread(generate_ai_assist_step, request.dict())
+        return result
+    except Exception as e:
+        raise HTTPException(400, f"AI assist step failed: {e}")
 
 
 @app.get("/api/ai/models")

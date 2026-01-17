@@ -1117,10 +1117,14 @@ var CardTitle = ({ children }) => (
 );
 
 // Section card component
-var SectionCard = ({ section, onUpdate, onRemove }) => {
+var SectionCard = ({ section, onUpdate, onRemove, onAiEdit, aiBusy }) => {
     const { base } = fromApiType(section.type);
     const cfg = SECTION_TYPES[base] || { name: base, color: '#888', hasLyrics: true };
     const lineCount = Math.max(3, (section.lyrics || '').split('\n').length + 1);
+    const handleAiEdit = () => {
+        if (!onAiEdit || aiBusy) return;
+        onAiEdit();
+    };
 
     return (
         <div style={{
@@ -1136,21 +1140,39 @@ var SectionCard = ({ section, onUpdate, onRemove }) => {
                 alignItems: 'center',
             }}>
                 <span style={{ fontSize: '15px', fontWeight: '500', color: cfg.color }}>{cfg.name}</span>
-                <button
-                    onClick={onRemove}
-                    style={{
-                        background: 'transparent',
-                        border: 'none',
-                        color: '#555',
-                        cursor: 'pointer',
-                        fontSize: '20px',
-                        padding: '4px 8px',
-                        lineHeight: 1,
-                        transition: 'color 0.15s',
-                    }}
-                    onMouseEnter={e => e.target.style.color = '#888'}
-                    onMouseLeave={e => e.target.style.color = '#555'}
-                >x</button>
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                    {cfg.hasLyrics && (
+                        <button
+                            onClick={handleAiEdit}
+                            disabled={aiBusy}
+                            style={{
+                                background: 'transparent',
+                                border: '1px solid #3a3a3a',
+                                color: aiBusy ? '#666' : '#10B981',
+                                cursor: aiBusy ? 'not-allowed' : 'pointer',
+                                fontSize: '11px',
+                                padding: '4px 8px',
+                                borderRadius: '8px',
+                                lineHeight: 1,
+                            }}
+                        >{aiBusy ? 'AI...' : 'AI'}</button>
+                    )}
+                    <button
+                        onClick={onRemove}
+                        style={{
+                            background: 'transparent',
+                            border: 'none',
+                            color: '#555',
+                            cursor: 'pointer',
+                            fontSize: '20px',
+                            padding: '4px 8px',
+                            lineHeight: 1,
+                            transition: 'color 0.15s',
+                        }}
+                        onMouseEnter={e => e.target.style.color = '#888'}
+                        onMouseLeave={e => e.target.style.color = '#555'}
+                    >x</button>
+                </div>
             </div>
             {cfg.hasLyrics && (
                 <div style={{ padding: '0 18px 16px 18px' }}>

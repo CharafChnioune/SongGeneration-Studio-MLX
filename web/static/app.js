@@ -25,6 +25,7 @@ var App = () => {
     const [aiModels, setAiModels] = useState([]);
     const [aiModelsLoading, setAiModelsLoading] = useState(false);
     const [aiModelsError, setAiModelsError] = useState('');
+    const [aiSectionBusyId, setAiSectionBusyId] = useState(null);
 
     // Generation state
     const [generating, setGenerating] = useState(false);
@@ -588,13 +589,75 @@ var App = () => {
         return String(value).split(',').map(v => v.trim()).filter(Boolean);
     };
 
-    const normalizeAiSections = (sectionsPayload) => {
-        if (!Array.isArray(sectionsPayload) || sectionsPayload.length === 0) return null;
-        return sectionsPayload.map((section, idx) => ({
-            id: `${Date.now()}-${idx}`,
-            type: section.type || 'verse',
-            lyrics: section.lyrics || '',
+    const mergeSectionsFromState = (nextSections, prevSections) => {
+        if (!Array.isArray(nextSections)) return prevSections;
+        return nextSections.map((section, idx) => ({
+            id: prevSections[idx]?.id || `${Date.now()}-${idx}`,
+            type: section.type || prevSections[idx]?.type || 'verse',
+            lyrics: section.lyrics ?? prevSections[idx]?.lyrics ?? '',
         }));
+    };
+
+    const applyAiState = (state, updateSections = false) => {
+        if (!state) return;
+        if (state.gender) setGender(state.gender);
+        if (state.genre) setGenres([state.genre]);
+        if (state.emotion) setMoods(splitTagList(state.emotion));
+        if (state.timbre) setTimbres(splitTagList(state.timbre));
+        if (state.instruments) setInstruments(splitTagList(state.instruments).slice(-1));
+        if (state.bpm) setBpm(Number(state.bpm));
+        if (state.custom_style) setCustomStyle(state.custom_style);
+        if (updateSections) {
+            const fallbackSections = (state.structure || []).map(type => ({ type, lyrics: '' }));
+            const nextSections = Array.isArray(state.sections) && state.sections.length ? state.sections : fallbackSections;
+            setSections(prev => mergeSectionsFromState(nextSections, prev));
+        }
+    };
+
+    const buildAiStateFromUI = () => ({
+        genre: genres[0] || '',
+        emotion: moods,
+        timbre: timbres,
+        instruments,
+        bpm,
+        gender,
+        custom_style: customStyle,
+        structure: sections.map(s => s.type),
+        sections: sections.map(s => ({ type: s.type, lyrics: s.lyrics || '' })),
+    });
+
+    const aiEditSection = async (sectionIndex) => {
+        const instruction = window.prompt('How should the AI adjust this section?');
+        if (!instruction || !instruction.trim()) return;
+        if (!aiModel || !aiModel.trim()) {
+            setAiError('Add a model name for the AI provider.');
+            return;
+        }
+        if (!aiPrompt || !aiPrompt.trim()) {
+            setAiError('Add a prompt or theme for the AI.');
+            return;
+        }
+        setAiSectionBusyId(sections[sectionIndex]?.id || 'busy');
+        try {
+            const payload = {
+                provider: aiProvider,
+                base_url: aiBaseUrl,
+                model: aiModel,
+                prompt: aiPrompt,
+                language: aiLanguage,
+                length: aiLength,
+                step: 'edit',
+                section_index: sectionIndex,
+                instruction: instruction.trim(),
+                state: buildAiStateFromUI(),
+            };
+            const result = await requestAIAssistStep(payload);
+            applyAiState(result.state, true);
+        } catch (e) {
+            setAiError(e.message || 'AI edit failed.');
+        } finally {
+            setAiSectionBusyId(null);
+        }
     };
 
     const runAIAssist = async () => {
@@ -609,7 +672,18 @@ var App = () => {
         }
         setAiBusy(true);
         try {
-            const payload = {
+            let state = {
+                genre: genres[0] || '',
+                emotion: moods,
+                timbre: timbres,
+                instruments,
+                bpm,
+                gender,
+                custom_style: customStyle,
+                structure: [],
+                sections: [],
+            };
+            const basePayload = {
                 provider: aiProvider,
                 base_url: aiBaseUrl,
                 model: aiModel,
@@ -617,17 +691,23 @@ var App = () => {
                 language: aiLanguage,
                 length: aiLength,
             };
-            const result = await requestAIAssist(payload);
-            if (result.gender) setGender(result.gender);
-            if (result.genre) setGenres([result.genre]);
-            if (result.emotion) setMoods(splitTagList(result.emotion));
-            if (result.timbre) setTimbres(splitTagList(result.timbre));
-            if (result.instruments) setInstruments(splitTagList(result.instruments).slice(-1));
-            if (result.bpm) setBpm(Number(result.bpm));
-            if (result.custom_style) setCustomStyle(result.custom_style);
-
-            const updatedSections = normalizeAiSections(result.sections);
-            if (updatedSections) setSections(updatedSections);
+            const steps = ['genre', 'emotion', 'timbre', 'instruments', 'bpm', 'gender', 'structure'];
+            for (const step of steps) {
+                const result = await requestAIAssistStep({ ...basePayload, step, state });
+                state = result.state || state;
+                applyAiState(state, step === 'structure');
+            }
+            if (state.structure && state.structure.length) {
+                if (!state.sections || !state.sections.length) {
+                    state.sections = state.structure.map(type => ({ type, lyrics: '' }));
+                    applyAiState(state, true);
+                }
+                for (let i = 0; i < state.structure.length; i++) {
+                    const result = await requestAIAssistStep({ ...basePayload, step: 'lyrics', section_index: i, state });
+                    state = result.state || state;
+                    applyAiState(state, true);
+                }
+            }
         } catch (e) {
             setAiError(e.message || 'AI assist failed.');
         } finally {
@@ -1076,7 +1156,16 @@ var App = () => {
                                 </div>
                             </Card>
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                                {sections.map(s => <SectionCard key={s.id} section={s} onUpdate={u => updateSection(s.id, u)} onRemove={() => removeSection(s.id)} />)}
+                                {sections.map((s, idx) => (
+                                    <SectionCard
+                                        key={s.id}
+                                        section={s}
+                                        onUpdate={u => updateSection(s.id, u)}
+                                        onRemove={() => removeSection(s.id)}
+                                        onAiEdit={() => aiEditSection(idx)}
+                                        aiBusy={aiSectionBusyId === s.id}
+                                    />
+                                ))}
                             </div>
                         </main>
 

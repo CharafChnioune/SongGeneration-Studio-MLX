@@ -81,6 +81,16 @@ var requestAIAssist = async (payload) => {
     return r.json();
 };
 
+var requestAIAssistStep = async (payload) => {
+    const r = await fetch('/api/ai/assist-step', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+    });
+    if (!r.ok) throw new Error(await r.text());
+    return r.json();
+};
+
 var fetchAiModels = async (provider, baseUrl) => {
     const params = new URLSearchParams({
         provider: provider || 'lmstudio',
