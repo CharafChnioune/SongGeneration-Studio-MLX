@@ -11,7 +11,10 @@ import tempfile
 from datetime import datetime
 from pathlib import Path
 
-from config import BASE_DIR, DEFAULT_MODEL, MLX_WEIGHT_PREFERENCE
+BASE_DIR = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(BASE_DIR))
+
+from config import DEFAULT_MODEL, MLX_WEIGHT_PREFERENCE  # noqa: E402
 
 
 def _truthy_env(name: str) -> bool:
