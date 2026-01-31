@@ -4,6 +4,7 @@ SongGeneration Studio - MLX Model Registry & Download Manager.
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import sys
@@ -13,7 +14,7 @@ from pathlib import Path
 from typing import Dict, Optional, List
 
 import requests
-from huggingface_hub import HfApi, HfFolder, hf_hub_url
+from huggingface_hub import HfApi, hf_hub_url
 
 from config import (
     BASE_DIR,
@@ -102,6 +103,30 @@ RUNTIME_REQUIRED = (
     BASE_DIR / "ckpt" / "vae" / "autoencoder_music_1320k.npz",
     BASE_DIR / "third_party" / "demucs" / "ckpt" / "htdemucs.onnx",
 )
+
+
+def _get_hf_token() -> Optional[str]:
+    try:
+        from huggingface_hub import get_token as hf_get_token
+    except Exception:
+        hf_get_token = None
+
+    if hf_get_token is not None:
+        token = hf_get_token()
+        if token:
+            return token
+
+    try:
+        from huggingface_hub import HfFolder  # legacy fallback
+    except Exception:
+        HfFolder = None
+
+    if HfFolder is not None:
+        token = _get_hf_token()
+        if token:
+            return token
+
+    return os.getenv("HF_TOKEN") or os.getenv("HUGGINGFACE_HUB_TOKEN")
 
 
 def _is_available(model_id: str) -> bool:
