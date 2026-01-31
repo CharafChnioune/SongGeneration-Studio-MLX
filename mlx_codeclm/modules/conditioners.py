@@ -1,5 +1,6 @@
 """Conditioner modules for MLX inference."""
 
+import os
 import typing as tp
 from dataclasses import dataclass, field
 from collections import defaultdict
@@ -13,6 +14,10 @@ from mlx_codeclm.modules.streaming import StreamingModule
 from mlx_codeclm.utils.module_list import ModuleList
 
 ConditionType = tp.Tuple[mx.array, mx.array, mx.array]
+
+os.environ.setdefault("TRANSFORMERS_NO_TORCH", "1")
+os.environ.setdefault("TRANSFORMERS_NO_TF", "1")
+os.environ.setdefault("TRANSFORMERS_NO_FLAX", "1")
 
 
 class AudioCondition(tp.NamedTuple):

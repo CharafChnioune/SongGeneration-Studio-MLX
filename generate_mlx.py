@@ -8,6 +8,7 @@ import random
 import subprocess
 import sys
 import gc
+import importlib.metadata as metadata
 from pathlib import Path
 from typing import Optional
 
@@ -26,6 +27,31 @@ from mlx_codeclm.models.codeclm import CodecLM
 from mlx_codeclm.utils.weights import load_weights_npz
 from mlx_codeclm.audio_io import save_audio
 from mlx_codeclm.separator import create_separator
+
+
+def _truthy_env(name: str) -> bool:
+    return os.getenv(name, "").strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+def _mlx_debug_enabled(args) -> bool:
+    return bool(getattr(args, "debug_mlx", False) or _truthy_env("SONGGEN_MLX_DEBUG"))
+
+
+def _mlx_version() -> str:
+    try:
+        return metadata.version("mlx")
+    except Exception:
+        return getattr(mx, "__version__", "unknown")
+
+
+def _mlx_sync() -> None:
+    if hasattr(mx, "synchronize"):
+        mx.synchronize()
+
+
+def _debug_log(enabled: bool, message: str) -> None:
+    if enabled:
+        print(message, flush=True)
 
 
 def ensure_stereo(audio: np.ndarray) -> np.ndarray:
@@ -170,6 +196,7 @@ def parse_args():
         default=5,
         help="Extension stride in seconds for long generations",
     )
+    parser.add_argument("--debug_mlx", action="store_true", help="Enable extra MLX debug logs")
     return parser.parse_args()
 
 def load_auto_prompts(path: str) -> dict[str, np.ndarray]:
@@ -203,11 +230,19 @@ def ensure_runtime_assets(base_dir: Path, needs_separator: bool) -> None:
 
 def main():
     args = parse_args()
+    debug = _mlx_debug_enabled(args)
+    _debug_log(debug, f"[MLX] version={_mlx_version()}")
+    try:
+        _debug_log(debug, f"[MLX] default_device={mx.default_device()}")
+        _debug_log(debug, f"[MLX] device_info={mx.device_info()}")
+    except Exception as exc:
+        _debug_log(debug, f"[MLX] device query failed: {exc}")
     if args.seed is not None:
         seed = int(args.seed)
         random.seed(seed)
         np.random.seed(seed)
         mx.random.seed(seed)
+        _debug_log(debug, f"[MLX] seed={seed}")
     OmegaConf.register_new_resolver("eval", lambda x: eval(x))
     OmegaConf.register_new_resolver("concat", lambda *x: [xxx for xx in x for xxx in xx])
     OmegaConf.register_new_resolver("load_yaml", lambda x: list(OmegaConf.load(x)))
@@ -241,6 +276,7 @@ def main():
 
     lm = builders.get_lm_model(cfg)
     load_weights_npz(lm, args.weights)
+    _mlx_sync()
 
     audiotokenizer = builders.get_audio_tokenizer_model(cfg.audio_tokenizer_checkpoint, cfg) if needs_audio_tokenizer else None
     seperate_tokenizer = None
@@ -278,6 +314,10 @@ def main():
         top_p=top_p,
         record_tokens=record_tokens,
         record_window=record_window,
+    )
+    _debug_log(
+        debug,
+        f"[MLX] gen_params duration={duration} cfg={cfg_coef} temp={temp} top_k={top_k} top_p={top_p} extend_stride={args.extend_stride}",
     )
 
     os.makedirs(args.save_dir, exist_ok=True)
@@ -404,7 +444,9 @@ def main():
             melody_is_wav=melody_is_wav,
             return_tokens=True,
         )
+        _mlx_sync()
         mid_time = time.time()
+        _debug_log(debug, f"[MLX] tokens shape={tokens.shape} dtype={tokens.dtype}")
         if args.tokens_only:
             tokens_path = os.path.join(args.save_dir, "tokens", f"{item['idx']}.npz")
             np.savez(tokens_path, tokens=np.array(tokens))
@@ -422,6 +464,7 @@ def main():
                     chunk_size=128,
                     duration=duration,
                 )
+                _mlx_sync()
                 audio_vocal = model.generate_audio(
                     tokens,
                     gen_type="vocal",
@@ -432,6 +475,7 @@ def main():
                     chunk_size=128,
                     duration=duration,
                 )
+                _mlx_sync()
                 audio_bgm = model.generate_audio(
                     tokens,
                     gen_type="bgm",
@@ -442,6 +486,7 @@ def main():
                     chunk_size=128,
                     duration=duration,
                 )
+                _mlx_sync()
                 vocal_path = target_wav_name.replace(".flac", "_vocal.flac")
                 bgm_path = target_wav_name.replace(".flac", "_bgm.flac")
                 mixed_wav = save_audio_outputs(
@@ -470,6 +515,7 @@ def main():
                     chunk_size=128,
                     duration=duration,
                 )
+                _mlx_sync()
                 wav_path = save_audio_outputs(
                     target_wav_name, np.array(audio), sample_rate=cfg.sample_rate, max_seconds=duration
                 )
