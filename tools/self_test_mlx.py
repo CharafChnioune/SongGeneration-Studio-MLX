@@ -8,6 +8,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -92,6 +93,39 @@ def _run_generate(cmd: list[str], dry_run: bool) -> int:
     return proc.returncode
 
 
+def _download_model(model_id: str, dry_run: bool) -> bool:
+    if dry_run:
+        _log(f"[SELF-TEST] Dry run: would download model {model_id}")
+        return True
+    try:
+        from models import start_model_download, download_states
+    except Exception as exc:
+        _log(f"[SELF-TEST] Failed to import model downloader: {exc}")
+        return False
+    status = start_model_download(model_id)
+    if status.get("error"):
+        _log(f"[SELF-TEST] Download error: {status['error']}")
+        return False
+    last_progress = -1
+    while True:
+        current = download_states.get(model_id, {})
+        state = current.get("status")
+        progress = current.get("progress", 0)
+        if progress != last_progress:
+            stage = current.get("stage", "model")
+            speed = current.get("speed_mbps", 0)
+            eta = current.get("eta_seconds", 0)
+            _log(f"[SELF-TEST] Download {stage}: {progress}% ({speed} MB/s, eta {eta}s)")
+            last_progress = progress
+        if state in ("completed", "error"):
+            break
+        time.sleep(5)
+    if current.get("status") == "error":
+        _log(f"[SELF-TEST] Download failed: {current.get('error')}")
+        return False
+    return True
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="MLX self-test for SongGeneration")
     parser.add_argument("--model", default=DEFAULT_MODEL, help="Model id to test")
@@ -100,6 +134,7 @@ def main() -> int:
     parser.add_argument("--tokens_only", action="store_true", help="Only generate tokens")
     parser.add_argument("--debug", action="store_true", help="Enable MLX debug logs")
     parser.add_argument("--fetch_runtime", action="store_true", help="Download runtime assets if missing")
+    parser.add_argument("--download_model", action="store_true", help="Download model if missing")
     parser.add_argument("--dry_run", action="store_true", help="Show what would run without executing")
     args = parser.parse_args()
 
@@ -108,6 +143,11 @@ def main() -> int:
         return 1
 
     model_id, weight_path = _find_local_models(BASE_DIR, args.model)
+    if model_id is None and args.download_model:
+        _log(f"[SELF-TEST] Downloading model {args.model} ...")
+        if not _download_model(args.model, args.dry_run):
+            return 2
+        model_id, weight_path = _find_local_models(BASE_DIR, args.model)
     if model_id is None or weight_path is None:
         _log("[SELF-TEST] No local MLX models found. Download a model in the UI first.")
         return 2

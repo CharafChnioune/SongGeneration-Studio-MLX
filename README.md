@@ -84,6 +84,7 @@ Optional flags:
 
 - `--tokens_only` to skip audio decode.
 - `--fetch_runtime` to download runtime assets if missing.
+- `--download_model` to fetch the selected model if missing.
 - `--debug` or `SONGGEN_MLX_DEBUG=1` for MLX debug logs.
 
 ## Lyrics format notes
