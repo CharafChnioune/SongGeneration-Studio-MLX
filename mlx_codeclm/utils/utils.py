@@ -18,6 +18,18 @@ def _sanitize_prob_row(row: np.ndarray) -> np.ndarray:
 
 def _sanitize_probs(probs: mx.array) -> mx.array:
     """Ensure probabilities are finite, non-negative, and normalized."""
+    if not hasattr(mx, "isfinite"):
+        probs_np = np.array(probs, dtype=np.float64)
+        probs_np = np.where(np.isfinite(probs_np), probs_np, 0.0)
+        probs_np = np.maximum(probs_np, 0.0)
+        denom = probs_np.sum(axis=-1, keepdims=True)
+        vocab = probs_np.shape[-1] if probs_np.ndim > 0 else 0
+        if vocab <= 0:
+            return mx.array(probs_np)
+        uniform = np.full_like(probs_np, 1.0 / float(vocab))
+        probs_np = np.where(denom > 0, probs_np / denom, uniform)
+        return mx.array(probs_np)
+
     probs = probs.astype(mx.float32)
     probs = mx.where(mx.isfinite(probs), probs, 0.0)
     probs = mx.maximum(probs, 0.0)
@@ -62,8 +74,7 @@ def sample_top_k(probs: mx.array, k: int) -> mx.array:
     topk = mx.sort(probs, axis=-1)[:, :, -k:]
     min_val = topk[:, :, :1]
     mask = probs >= min_val
-    probs = probs * mask
-    probs = probs / mx.sum(probs, axis=-1, keepdims=True)
+    probs = _sanitize_probs(probs * mask)
     return multinomial(probs, num_samples=1)
 
 

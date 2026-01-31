@@ -72,6 +72,20 @@ python generate_mlx.py \
 
 Outputs `.flac` + `.wav` in `output/cli/audios/`.
 
+## Self-test (MLX)
+
+Quick end-to-end check that generates a short sample if a local model is present:
+
+```bash
+python tools/self_test_mlx.py --duration 12
+```
+
+Optional flags:
+
+- `--tokens_only` to skip audio decode.
+- `--fetch_runtime` to download runtime assets if missing.
+- `--debug` or `SONGGEN_MLX_DEBUG=1` for MLX debug logs.
+
 ## Lyrics format notes
 
 - `[intro-short]`, `[intro-medium]`, `[inst-short]`, `[inst-medium]`, `[outro-short]`, `[outro-medium]` are instrumental (lyrics are ignored).
