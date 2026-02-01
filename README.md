@@ -58,6 +58,40 @@ python main.py --host 127.0.0.1 --port 8000
 
 Open `http://127.0.0.1:8000`.
 
+## API (for mobile/desktop apps)
+
+OpenAPI docs are available at:
+
+- `/api/docs`
+- `/api/openapi.json`
+
+Example: start a generation
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/generate \\
+  -H 'Content-Type: application/json' \\
+  -d '{
+    "title": "Demo",
+    "sections": [{"type":"verse","lyrics":"Night drive. neon sky."}],
+    "genre": "pop",
+    "emotion": "uplifting",
+    "timbre": "soft",
+    "instruments": "piano, synthesizer",
+    "bpm": 120,
+    "output_mode": "mixed"
+  }'
+```
+
+Example: generate with reference audio (single request)
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/generate-with-reference \\
+  -F 'payload={"title":"Demo","sections":[{"type":"verse","lyrics":"Night drive. neon sky."}],"output_mode":"mixed"}' \\
+  -F 'file=@/path/to/reference.wav' \\
+  -F 'trim_start=0' \\
+  -F 'trim_duration=10'
+```
+
 ## CLI (MLX)
 
 Make sure you have downloaded the model first (via the UI or by placing weights in the model folder).

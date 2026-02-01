@@ -230,7 +230,14 @@ async def lifespan(app):
         except asyncio.CancelledError:
             pass
 
-app = FastAPI(title="SongGeneration Studio", version="1.0.0", lifespan=lifespan)
+app = FastAPI(
+    title="SongGeneration Studio",
+    version="1.0.0",
+    lifespan=lifespan,
+    docs_url="/api/docs",
+    redoc_url="/api/redoc",
+    openapi_url="/api/openapi.json",
+)
 
 app.add_middleware(
     CORSMiddleware,
@@ -257,6 +264,16 @@ async def root():
 @app.get("/api/health")
 async def health_check():
     return {"status": "ok", "gpu": gpu_info}
+
+
+@app.get("/api/info")
+async def api_info():
+    return {
+        "name": "SongGeneration Studio",
+        "version": app.version,
+        "docs": "/api/docs",
+        "openapi": "/api/openapi.json",
+    }
 
 
 @app.get("/api/gpu")
@@ -413,6 +430,35 @@ async def upload_and_trim_reference(
         # Clean up temp file
         if temp_original.exists():
             temp_original.unlink()
+
+
+@app.post("/api/generate-with-reference")
+async def generate_with_reference(
+    payload: str = Form(...),
+    file: UploadFile = File(...),
+    trim_start: float = Form(0.0),
+    trim_duration: float = Form(10.0),
+    background_tasks: BackgroundTasks = None,
+):
+    """Generate a song with a single multipart request (JSON payload + reference audio)."""
+    try:
+        data = json.loads(payload)
+    except Exception:
+        raise HTTPException(400, "Invalid JSON payload")
+
+    ref = await upload_and_trim_reference(
+        file=file,
+        trim_start=trim_start,
+        trim_duration=trim_duration,
+    )
+    if not isinstance(ref, dict) or "id" not in ref:
+        raise HTTPException(500, "Reference upload failed")
+
+    data["reference_audio_id"] = ref["id"]
+    request = SongRequest(**data)
+    if background_tasks is None:
+        background_tasks = BackgroundTasks()
+    return await generate_song(request, background_tasks)
 
 
 @app.get("/api/reference/{ref_id}")
