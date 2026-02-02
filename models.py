@@ -122,7 +122,7 @@ def _get_hf_token() -> Optional[str]:
         HfFolder = None
 
     if HfFolder is not None:
-        token = _get_hf_token()
+        token = HfFolder.get_token()
         if token:
             return token
 
@@ -353,7 +353,7 @@ def _download_worker(model_id: str) -> None:
                 "stage": stage,
             }
 
-        token = HfFolder.get_token()
+        token = _get_hf_token()
         headers = {"Authorization": f"Bearer {token}"} if token else {}
 
         def download_files(files: List[dict], base_dir: Path, stage: str, repo: str) -> None:
