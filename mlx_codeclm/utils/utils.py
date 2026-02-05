@@ -37,7 +37,7 @@ def _sanitize_probs(probs: mx.array) -> mx.array:
     vocab = probs.shape[-1] if probs.ndim > 0 else 0
     if vocab <= 0:
         return probs
-    uniform = mx.full_like(probs, 1.0 / float(vocab))
+    uniform = mx.full(probs.shape, 1.0 / float(vocab), dtype=probs.dtype)
     probs = mx.where(denom > 0, probs / denom, uniform)
     return probs
 
